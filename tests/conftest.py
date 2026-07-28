@@ -2,6 +2,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from beets.test._common import DummyIO
 from beets.util import cached_classproperty
 
 RSRC = Path(__file__).parent / "rsrc"
@@ -19,6 +20,19 @@ def _reset_model_type_cache():
     cached_classproperty.cache.clear()
     yield
     cached_classproperty.cache.clear()
+
+
+@pytest.fixture
+def io(request, monkeypatch, capteesys):
+    """Provide the `io` fixture that beets' IOMixin expects.
+
+    beets ships IOMixin in its wheel but defines the fixture only in its
+    own conftest, so downstream test suites must supply it themselves.
+    """
+    dummy = DummyIO(monkeypatch, capteesys)
+    if request.instance is not None:
+        request.instance.io = dummy
+    return dummy
 
 
 @pytest.fixture

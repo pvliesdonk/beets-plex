@@ -146,6 +146,21 @@ class PlexPlugin(BeetsPlugin):
 
         collections.run(self, lib, opts, args)
 
+    def cmd_status(self, lib, opts, args):
+        server = self.server()
+        music = self.music()
+        beets_dir, plex_dir = self.dirs()
+        path_map = match.build_path_map(music)
+        matched = unmatched = 0
+        for item in lib.items(args):
+            if match.resolve(item, path_map, beets_dir, plex_dir) is None:
+                unmatched += 1
+            else:
+                matched += 1
+        ui.print_(f"server: {server.friendlyName}")
+        ui.print_(f"library: {music.title} ({len(path_map)} track files)")
+        ui.print_(f"items: {matched} matched, {unmatched} unmatched")
+
     # -- auto-scan -----------------------------------------------------
 
     def _note_path(self, item_path):

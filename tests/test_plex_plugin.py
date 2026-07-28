@@ -1,7 +1,7 @@
 import pytest
 from beets import plugins as plugin_registry
 from beets import ui
-from beets.test.helper import PluginTestHelper
+from beets.test.helper import IOMixin, PluginTestHelper
 
 from tests.fakeplex import FakeMusicSection, FakeServer
 
@@ -80,3 +80,26 @@ class TestPlexPluginSkeleton(PluginTestHelper):
         with plugin.suspend_stamp():
             assert plugin._suspend_rating_stamp is True
         assert plugin._suspend_rating_stamp is False
+
+
+class TestStatus(IOMixin, PluginTestHelper):
+    plugin = "plex"
+
+    def test_status_reports_counts(self):
+        from beets import config
+
+        from tests.fakeplex import FakeMusicSection, FakeServer, FakeTrack
+
+        config["plex"]["beets_dir"] = "/music"
+        config["plex"]["plex_dir"] = "/plex"
+        plugin = plex_plugin()
+        plugin._server = FakeServer(
+            FakeMusicSection(tracks=[FakeTrack(1, ["/plex/A/a.mp3"])])
+        )
+        self.add_item(path=b"/music/A/a.mp3", title="hit")
+        self.add_item(path=b"/music/B/missing.mp3", title="miss")
+
+        output = self.run_with_output("plex", "status")
+
+        assert "1 matched" in output
+        assert "1 unmatched" in output
