@@ -1,6 +1,7 @@
 """Push query-defined playlists from beets to Plex."""
 
 from beets import ui
+from beets.dbcore.query import InvalidQueryError
 from beets.library import Item, parse_query_string
 from plexapi.exceptions import PlexApiException
 from requests.exceptions import RequestException
@@ -51,11 +52,12 @@ def select(entries, names, kind="playlist"):
 def resolve_tracks(plugin, items, path_map, beets_dir, plex_dir, kind, name):
     """Resolve beets items to Plex tracks, refusing a total match failure.
 
-    An empty result means "delete the remote object", so it must only ever
-    come from a query that genuinely matched nothing. If the query matched
+    An empty result is treated as "the query matched nothing", which under
+    `plex.prune` deletes the remote object. It must therefore only ever
+    come from a query that really did match nothing. If the query matched
     items but none of them are in Plex (a wrong `plex_dir`, a library
-    mid-scan, a section that was re-created), deleting would destroy the
-    user's playlists and collections on a misconfiguration.
+    mid-scan, a section that was re-created), that is a misconfiguration
+    and must not be mistaken for an empty result.
     """
     tracks = []
     matched = 0
@@ -89,6 +91,8 @@ def run(plugin, lib, opts, args):
     failed = 0
     for name, query_string in select(configured(plugin), args):
         # One entry's failure must not cancel the entries behind it.
+        # A refused resolve or a malformed query is the likeliest
+        # failure here, so those count too, not just server faults.
         try:
             query, sort = parse_query_string(query_string, Item)
             tracks = resolve_tracks(
@@ -101,7 +105,12 @@ def run(plugin, lib, opts, args):
                 name,
             )
             _apply(plugin, server, name, tracks, pretend, prune)
-        except (PlexApiException, RequestException) as exc:
+        except (
+            PlexApiException,
+            RequestException,
+            ui.UserError,
+            InvalidQueryError,
+        ) as exc:
             failed += 1
             plugin._log.warning("plex: playlist {0} failed: {1}", name, exc)
     if failed:

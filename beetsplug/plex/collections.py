@@ -1,6 +1,7 @@
 """Sync query-defined track collections from beets to Plex."""
 
 from beets import ui
+from beets.dbcore.query import InvalidQueryError
 from beets.library import Item, parse_query_string
 from plexapi.exceptions import PlexApiException
 from requests.exceptions import RequestException
@@ -26,6 +27,8 @@ def run(plugin, lib, opts, args):
     failed = 0
     for name, query_string in select(configured(plugin), args, kind="collection"):
         # One entry's failure must not cancel the entries behind it.
+        # A refused resolve or a malformed query is the likeliest
+        # failure here, so those count too, not just server faults.
         try:
             query, _ = parse_query_string(query_string, Item)
             tracks = resolve_tracks(
@@ -38,7 +41,12 @@ def run(plugin, lib, opts, args):
                 name,
             )
             _apply(plugin, server, music, name, tracks, pretend, prune)
-        except (PlexApiException, RequestException) as exc:
+        except (
+            PlexApiException,
+            RequestException,
+            ui.UserError,
+            InvalidQueryError,
+        ) as exc:
             failed += 1
             plugin._log.warning("plex: collection {0} failed: {1}", name, exc)
     if failed:
@@ -57,8 +65,20 @@ def _apply(plugin, server, music, name, tracks, pretend, prune=False):
             )
             return
     existing = same_name[0] if same_name else None
+
+    if not tracks and same_name and not prune:
+        # A query matching nothing is far more often a typo than an
+        # instruction to delete. This has to come before the duplicate
+        # collapse below, or a typo would still destroy the duplicates.
+        plugin._log.warning(
+            "plex: collection {0} left alone: the query matched nothing "
+            "(set plex.prune to delete it instead)",
+            name,
+        )
+        return
+
     # Duplicate titles are possible in Plex; the extras would otherwise be
-    # invisible to every later run. Same handling as playlists.
+    # invisible to every later run.
     for stale in same_name[1:]:
         if pretend:
             ui.print_(f"plex: would delete a duplicate collection {name}")
@@ -82,15 +102,6 @@ def _apply(plugin, server, music, name, tracks, pretend, prune=False):
         return
 
     if not tracks:
-        if not prune:
-            # A query matching nothing is far more often a typo than an
-            # instruction to delete; see the playlist equivalent.
-            plugin._log.warning(
-                "plex: collection {0} left alone: the query matched nothing "
-                "(set plex.prune to delete it instead)",
-                name,
-            )
-            return
         if pretend:
             ui.print_(f"plex: would delete collection {name}")
             return

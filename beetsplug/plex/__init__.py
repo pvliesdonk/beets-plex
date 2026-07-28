@@ -177,7 +177,8 @@ class PlexPlugin(BeetsPlugin):
     def _note_path(self, item_path):
         # Runs inside beets' import/move/remove events, which beets does not
         # guard, so a malformed beets_dir/plex_dir must not break the user's
-        # command. The scan itself reports the failure at exit.
+        # command. Nothing is queued in that case, so the warning below is
+        # the only report; it never reaches flush().
         try:
             beets_dir, plex_dir = self.dirs()
             target = match.plex_path(item_path, beets_dir, plex_dir)

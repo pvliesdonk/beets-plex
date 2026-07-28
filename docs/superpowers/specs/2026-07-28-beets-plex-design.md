@@ -211,7 +211,7 @@ absent field).
 | no | no | none |
 | no | yes | pull: set `rating` = p (0.0 when Plex is unrated), `try_write()` |
 | yes | no | push: `track.rate(b)`, or `track.rate(None)` to clear when b is 0.0; this endpoint bumps Plex `lastRatedAt` |
-| yes | yes | newest wins: compare `rating_updated` vs Plex `lastRatedAt`; if `rating_updated` is missing, use the `conflict:` config |
+| yes | yes | newest wins: compare `rating_updated` vs Plex `lastRatedAt`; if either timestamp is missing, use the `conflict:` config |
 
 After the action succeeds (ordering contract: never before), the item's
 base, stats mirrors, and `plex_updated` are updated and stored in one
@@ -243,8 +243,9 @@ resolve tracks via the path map, and make the Plex playlist match exactly
   item removal is one HTTP request per item and ambiguous for duplicate
   entries; recreate is O(1) requests and deterministic. Plex-side manual
   edits to these playlists are intentionally overwritten.
-- An empty query result deletes the existing playlist (with a warning) and
-  creates nothing.
+- An empty query result leaves the existing playlist alone with a warning,
+  because a query matching nothing is usually a typo. It deletes the
+  playlist only when `prune:` is enabled.
 - A same-named Plex smart playlist is never touched: warn and skip (the API
   refuses item manipulation on smart playlists anyway).
 - A same-named non-audio playlist: warn and skip.
@@ -258,7 +259,8 @@ query, resolve, then diff against current collection items and apply batched
 library-global (visible to all accounts) and recreation would discard
 Plex-side artwork and sort settings.
 
-- An empty query result deletes the collection (with a warning).
+- An empty query result leaves the collection alone with a warning, and
+  deletes it only when `prune:` is enabled (as for playlists).
 - A same-named collection with a different subtype (album/artist) or a smart
   collection: warn and skip.
 - Item order in collections is not managed.

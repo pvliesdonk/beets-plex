@@ -161,8 +161,9 @@ def run(plugin, lib, opts, args):
                 plugin._log.warning("plex: rating push failed for {0}: {1}", item, exc)
                 continue
             counts["pushed"] += 1
-            # Plex's own lastRatedAt for this rating; the track object was
-            # fetched before the push, so its copy is one rating behind.
+            # Approximate Plex's lastRatedAt with the local clock: the
+            # track object was fetched before the push and plexapi's rate()
+            # does not reload it, so its own copy is one rating behind.
             pushed_at = time.time()
         elif decision.action == PULL:
             plugin._log.info(

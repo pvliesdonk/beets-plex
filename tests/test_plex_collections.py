@@ -98,6 +98,56 @@ class TestCollections(CollectionBase):
 
         assert section.collections() == []
 
+    def test_empty_query_leaves_duplicates_alone_without_prune(self):
+        # The duplicate collapse must not run ahead of the prune guard, or
+        # a typo'd query still destroys collections while the log claims
+        # nothing was touched.
+        plugin = self.setup_plex([], [{"name": "Top2000", "query": "title:none"}])
+        section = self.section(plugin)
+        first = FakeCollection(section, "Top2000", [FakeTrack(9, ["/x"])])
+        second = FakeCollection(section, "Top2000", [FakeTrack(8, ["/y"])])
+        section._collections.extend([first, second])
+
+        self.run_command("plex", "collections")
+
+        assert section.collections() == [first, second]
+
+    def test_one_failing_entry_does_not_cancel_the_others(self):
+        # A refused resolve is far likelier than a server fault, so it must
+        # not abort the entries queued behind it either.
+        a = FakeTrack(1, ["/plex/A/a.mp3"])
+        plugin = self.setup_plex(
+            [a],
+            [
+                {"name": "Bad", "query": "title:orphan"},
+                {"name": "Good", "query": "title:t"},
+            ],
+        )
+        # Matches the query but is not in Plex, so resolve refuses.
+        self.add_item(path=b"/music/C/orphan.mp3", title="orphan")
+        self.add_item(path=b"/music/A/a.mp3", title="t")
+
+        with pytest.raises(ui.UserError):
+            self.run_command("plex", "collections")
+
+        assert [c.title for c in self.section(plugin).collections()] == ["Good"]
+
+    def test_malformed_query_does_not_cancel_the_others(self):
+        a = FakeTrack(1, ["/plex/A/a.mp3"])
+        plugin = self.setup_plex(
+            [a],
+            [
+                {"name": "Bad", "query": "'unterminated"},
+                {"name": "Good", "query": "title:t"},
+            ],
+        )
+        self.add_item(path=b"/music/A/a.mp3", title="t")
+
+        with pytest.raises(ui.UserError):
+            self.run_command("plex", "collections")
+
+        assert [c.title for c in self.section(plugin).collections()] == ["Good"]
+
     def test_duplicate_collection_titles_are_collapsed(self):
         a = FakeTrack(1, ["/plex/A/a.mp3"])
         plugin = self.setup_plex([a], [{"name": "Top2000", "query": ""}])

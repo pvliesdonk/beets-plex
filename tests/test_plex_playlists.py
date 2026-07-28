@@ -183,6 +183,39 @@ class TestPlaylists(PlaylistBase):
 
         assert [p.title for p in plugin._server.playlists()] == ["good"]
 
+    def test_refused_resolve_does_not_cancel_the_others(self):
+        a = FakeTrack(1, ["/plex/A/a.mp3"])
+        plugin = self.setup_plex(
+            [a],
+            [
+                {"name": "bad", "query": "title:orphan"},
+                {"name": "good", "query": "title:t"},
+            ],
+        )
+        self.add_item(path=b"/music/C/orphan.mp3", title="orphan")
+        self.add_item(path=b"/music/A/a.mp3", title="t")
+
+        with pytest.raises(ui.UserError):
+            self.run_command("plex", "playlists")
+
+        assert [p.title for p in plugin._server.playlists()] == ["good"]
+
+    def test_malformed_query_does_not_cancel_the_others(self):
+        a = FakeTrack(1, ["/plex/A/a.mp3"])
+        plugin = self.setup_plex(
+            [a],
+            [
+                {"name": "bad", "query": "'unterminated"},
+                {"name": "good", "query": "title:t"},
+            ],
+        )
+        self.add_item(path=b"/music/A/a.mp3", title="t")
+
+        with pytest.raises(ui.UserError):
+            self.run_command("plex", "playlists")
+
+        assert [p.title for p in plugin._server.playlists()] == ["good"]
+
     def test_duplicate_titles_are_collapsed_to_one(self):
         # An interrupted earlier run can leave two playlists with the same
         # title; every stale one must go, not just the first.
