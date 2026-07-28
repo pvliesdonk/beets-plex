@@ -2653,8 +2653,8 @@ Add the methods to `PlexPlugin`:
 
 Note on `test_flush_swallows_connection_errors`: with `_server = None`,
 `plugin.music()` attempts a real `PlexServer("http://localhost:32400", ...)`
-connection, which fails fast with a `UserError` (or connection exception) —
-`flush` must catch it. If the environment actually has something listening on
+connection, which fails fast with a `UserError` (or connection exception),
+and `flush` must catch it. If the environment has something listening on
 localhost:32400, set `config["plex"]["port"] = 1` inside the test first.
 
 - [ ] **Step 4: Run to verify pass**
