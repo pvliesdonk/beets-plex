@@ -133,6 +133,11 @@ class PlexPlugin(BeetsPlugin):
 
         playlists.run(self, lib, opts, args)
 
+    def cmd_collections(self, lib, opts, args):
+        from . import collections
+
+        collections.run(self, lib, opts, args)
+
     def _dispatch(self, lib, opts, args):
         if not args:
             raise ui.UserError("plex: subcommand required: " + ", ".join(SUBCOMMANDS))
