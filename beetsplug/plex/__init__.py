@@ -123,6 +123,11 @@ class PlexPlugin(BeetsPlugin):
         cmd.func = self._dispatch
         return [cmd]
 
+    def cmd_sync(self, lib, opts, args):
+        from . import sync
+
+        sync.run(self, lib, opts, args)
+
     def _dispatch(self, lib, opts, args):
         if not args:
             raise ui.UserError("plex: subcommand required: " + ", ".join(SUBCOMMANDS))
