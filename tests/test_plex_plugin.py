@@ -76,10 +76,25 @@ class TestPlexPluginSkeleton(PluginTestHelper):
 
     def test_suspend_stamp_context(self):
         plugin = plex_plugin()
-        assert plugin._suspend_rating_stamp is False
+        assert not plugin._suspend_depth
         with plugin.suspend_stamp():
-            assert plugin._suspend_rating_stamp is True
-        assert plugin._suspend_rating_stamp is False
+            assert plugin._suspend_depth
+        assert not plugin._suspend_depth
+
+    def test_suspend_stamp_nests(self):
+        # A nested use must not re-arm stamping when the inner block exits.
+        plugin = plex_plugin()
+        with plugin.suspend_stamp():
+            with plugin.suspend_stamp():
+                assert plugin._suspend_depth == 2
+            assert plugin._suspend_depth == 1
+        assert plugin._suspend_depth == 0
+
+    def test_suspend_stamp_unwinds_on_exception(self):
+        plugin = plex_plugin()
+        with pytest.raises(RuntimeError), plugin.suspend_stamp():
+            raise RuntimeError("boom")
+        assert plugin._suspend_depth == 0
 
 
 class TestStatus(IOMixin, PluginTestHelper):

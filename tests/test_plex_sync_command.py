@@ -139,7 +139,7 @@ class TestSyncCommand(SyncBase):
 
         seen = []
         plugin_registry.BeetsPlugin.listeners.setdefault("write", []).append(
-            lambda **kw: seen.append(plugin._suspend_rating_stamp)
+            lambda **kw: seen.append(bool(plugin._suspend_depth))
         )
 
         self.run_command("plex", "sync")

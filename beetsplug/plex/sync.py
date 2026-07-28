@@ -91,11 +91,24 @@ def run(plugin, lib, opts, args):
         "by_policy": 0,
     }
 
+    warned_outside = False
     for item in lib.items(args):
         track = match.resolve(item, path_map, beets_dir, plex_dir)
         if track is None:
             counts["unmatched"] += 1
             plugin._log.debug("unmatched: {0}", item)
+            if (
+                not warned_outside
+                and match.plex_path(item.path, beets_dir, plex_dir) is None
+            ):
+                # Distinct from "Plex has not scanned it yet": these items
+                # can never match, so say so once rather than per item.
+                warned_outside = True
+                plugin._log.warning(
+                    "plex: some items live outside {0} and can never match; "
+                    "check beets_dir",
+                    beets_dir,
+                )
             continue
 
         decision = decide(
@@ -172,9 +185,11 @@ def run(plugin, lib, opts, args):
         counts["deferred"],
     )
     if counts["by_policy"]:
+        # Either side can be the one missing a timestamp: beets when the
+        # rating changed without a tag write, Plex when a rating was cleared.
         plugin._log.warning(
-            "plex: {0} conflict(s) resolved by the '{1}' policy because no "
-            "beets-side rating timestamp was available",
+            "plex: {0} conflict(s) resolved by the '{1}' policy because a "
+            "rating timestamp was missing on one side",
             counts["by_policy"],
             conflict,
         )

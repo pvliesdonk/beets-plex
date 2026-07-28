@@ -13,8 +13,15 @@ from typing import ClassVar
 
 import mediafile
 import mutagen.id3
+from beets import logging
 from beets.dbcore import types
 from beets.plugins import BeetsPlugin
+
+# The storage styles are plain mediafile objects, constructed before (and
+# usable without) the plugin, so they log through the module rather than
+# through BeetsPlugin._log. beets' getLogger keeps the str.format style
+# used everywhere else in this codebase.
+log = logging.getLogger("beets.ratingtag")
 
 
 def rating_from_popm(raw):
@@ -41,6 +48,7 @@ def rating_from_vorbis(raw, legacy=True):
     try:
         num = float(str(raw))
     except ValueError:
+        log.debug("ratingtag: ignoring non-numeric rating tag {0!r}", raw)
         return None
     if num <= 0:
         return None

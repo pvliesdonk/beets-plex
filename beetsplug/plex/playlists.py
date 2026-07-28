@@ -120,8 +120,10 @@ def _apply(plugin, server, name, tracks, pretend):
         plugin._log.info(
             "plex: playlist {0} rebuilt with {1} tracks", name, len(tracks)
         )
-    else:
+    elif same_name:
         plugin._log.warning("plex: playlist {0} removed (query matched nothing)", name)
+    else:
+        plugin._log.info("plex: playlist {0}: nothing to do", name)
     # Delete every pre-existing playlist of this title, not just the first:
     # an interrupted earlier run can leave duplicates behind.
     for stale in same_name:

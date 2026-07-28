@@ -47,7 +47,7 @@ class PlexPlugin(BeetsPlugin):
         )
         self.config["token"].redact = True
         self._server = None
-        self._suspend_rating_stamp = False
+        self._suspend_depth = 0
         self._scan_dirs = set()
         self.register_listener("write", self.on_write)
         self.register_listener("item_imported", self._on_item_event)
@@ -65,7 +65,7 @@ class PlexPlugin(BeetsPlugin):
         so the dirty set still identifies what changed. Suppressed while
         the sync itself is applying a pull.
         """
-        if self._suspend_rating_stamp:
+        if self._suspend_depth:
             return
         if "rating" in item._dirty:
             item.rating_updated = time.time()
@@ -106,11 +106,16 @@ class PlexPlugin(BeetsPlugin):
 
     @contextmanager
     def suspend_stamp(self):
-        self._suspend_rating_stamp = True
+        """Suppress rating_updated stamping for the duration of the block.
+
+        Counted rather than boolean: a nested use must not re-arm stamping
+        when the inner block exits while an outer one is still running.
+        """
+        self._suspend_depth += 1
         try:
             yield
         finally:
-            self._suspend_rating_stamp = False
+            self._suspend_depth -= 1
 
     # -- CLI -----------------------------------------------------------
 

@@ -63,6 +63,32 @@ class TestAutoScan(ScanBase):
         assert sorted(section.update_calls) == ["/plex/A", "/plex/B"]
         assert plugin._scan_dirs == set()
 
+    def test_flush_twice_scans_only_once(self):
+        # cli_exit can fire after an explicit flush; the queue is consumed,
+        # so the second call must not re-scan.
+        plugin = self.setup_plex()
+        plugin._scan_dirs = {"/plex/A"}
+        scan.flush(plugin)
+        scan.flush(plugin)
+        assert plugin._server._section.update_calls == ["/plex/A"]
+
+    def test_one_failing_directory_does_not_cancel_the_rest(self):
+        plugin = self.setup_plex()
+        section = plugin._server._section
+        real_update = section.update
+
+        def flaky(path=None):
+            if path == "/plex/B":
+                raise RuntimeError("boom")
+            real_update(path=path)
+
+        section.update = flaky
+        plugin._scan_dirs = {"/plex/A", "/plex/B", "/plex/C"}
+
+        scan.flush(plugin)
+
+        assert sorted(section.update_calls) == ["/plex/A", "/plex/C"]
+
     def test_flush_falls_back_to_full_scan_over_threshold(self):
         plugin = self.setup_plex()
         plugin._scan_dirs = {f"/plex/dir{i}" for i in range(25)}

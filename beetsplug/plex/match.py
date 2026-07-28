@@ -8,13 +8,18 @@ from beets import util
 def plex_path(item_path, beets_dir, plex_dir):
     """Translate a beets item path to the path the Plex server sees.
 
-    Returns None when the item lies outside beets_dir.
+    Returns None when the path lies outside beets_dir. The library root
+    itself translates to the Plex root, so `beet plex scan <beets_dir>`
+    works rather than reporting the root as outside itself.
     """
     path = util.displayable_path(item_path)
     base = beets_dir.rstrip(os.sep)
+    target = plex_dir.rstrip(os.sep)
+    if path == base:
+        return target
     if not path.startswith(base + os.sep):
         return None
-    return plex_dir.rstrip(os.sep) + path[len(base) :]
+    return target + path[len(base) :]
 
 
 def build_path_map(music, container_size=1000):
