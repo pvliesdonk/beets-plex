@@ -10,6 +10,7 @@ Unrated is 0.0 or an absent field; writing an unrated value removes the tag.
 """
 
 import mediafile
+import mutagen.id3
 
 
 def rating_from_popm(raw):
@@ -63,6 +64,51 @@ class VorbisRatingStorageStyle(mediafile.StorageStyle):
             self.delete(mutagen_file)
         else:
             super().set(mutagen_file, rating_to_vorbis(value))
+
+
+class PopmRatingStorageStyle(mediafile.MP3StorageStyle):
+    """Rating in a POPM frame, linear 0-255, matched by email."""
+
+    def __init__(self, email):
+        super().__init__("POPM")
+        self.email = email or ""
+
+    def _frame(self, mutagen_file):
+        if mutagen_file.tags is None:
+            return None
+        for frame in mutagen_file.tags.getall("POPM"):
+            if (frame.email or "") == self.email:
+                return frame
+        return None
+
+    def get(self, mutagen_file):
+        frame = self._frame(mutagen_file)
+        return rating_from_popm(frame.rating) if frame else None
+
+    def set(self, mutagen_file, value):
+        value = float(value or 0)
+        if value <= 0:
+            self.delete(mutagen_file)
+            return
+        if mutagen_file.tags is None:
+            mutagen_file.add_tags()
+        frame = self._frame(mutagen_file)
+        if frame is None:
+            mutagen_file.tags.add(
+                mutagen.id3.POPM(email=self.email, rating=rating_to_popm(value))
+            )
+        else:
+            frame.rating = rating_to_popm(value)
+
+    def delete(self, mutagen_file):
+        if mutagen_file.tags is None:
+            return
+        keep = [
+            frame
+            for frame in mutagen_file.tags.getall("POPM")
+            if (frame.email or "") != self.email
+        ]
+        mutagen_file.tags.setall("POPM", keep)
 
 
 class MP4RatingStorageStyle(mediafile.MP4StorageStyle):
