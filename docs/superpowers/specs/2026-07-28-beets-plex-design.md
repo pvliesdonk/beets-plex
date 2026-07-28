@@ -68,7 +68,10 @@ the repo's `beetsplug/` dir is added to `pluginpath`.
 ### Field
 
 Declares item field `rating`: float, scale 0-10 (Plex-native; 0-5 stars times
-two). "Unrated" is the absence of the field, distinct from a rating of 0.
+two). "Unrated" is represented as 0.0 or an absent field; the two are
+equivalent everywhere. Rationale: beets' `Item.write()` only writes fields
+present on the item, so an absent field cannot clear a stale tag, and Plex's
+own UI minimum is a half star (1.0), so 0 carries no rating information.
 The user's `types: rating: int` config line must be removed (the types plugin
 raises a conflict for differing declarations of the same field).
 
@@ -101,9 +104,9 @@ ratingtag:
   a 0-5 star value and multiplied by 2; writes always use 0-100.
 - POPM: only the frame matching `popm_email` is read; other POPM frames are
   ignored and preserved. Writing updates the matching frame or adds one.
-- A tag value of 0 (POPM 0, FLAC "0") is read as unrated (dropped), following
-  the common player convention. The DB value 0.0 is however a valid rating
-  and writes as the format's minimum non-absent value.
+- A tag value of 0 (POPM 0, FLAC "0") is read as unrated, following the
+  common player convention. Writing an unrated value (0.0) removes the tag
+  entirely rather than writing a literal 0.
 - Non-numeric or out-of-range tag values are ignored with a debug log.
 - Round-trip stability: DB -> tag -> DB reproduces the same value after
   one-decimal rounding for every representable rating.
@@ -193,13 +196,15 @@ minimizing unicode surprises); no case folding.
 ### Rating and stats sync: `beet plex sync [QUERY]`
 
 Three-way merge per matched item. base = `plex_userrating`, b = beets
-`rating`, p = Plex `userRating`. None (unrated) is a first-class value.
+`rating`, p = Plex `userRating`. All three are normalized to "unrated = 0.0"
+before comparison (Plex reports unrated as None; beets may have 0.0 or an
+absent field).
 
 | b != base | p != base | action |
 |---|---|---|
 | no | no | none |
-| no | yes | pull: set `rating` = p (or delete field if p is None), `try_write()` |
-| yes | no | push: `track.rate(b)` (`rate(None)` clears); this endpoint bumps Plex `lastRatedAt` |
+| no | yes | pull: set `rating` = p (0.0 when Plex is unrated), `try_write()` |
+| yes | no | push: `track.rate(b)`, or `track.rate(None)` to clear when b is 0.0; this endpoint bumps Plex `lastRatedAt` |
 | yes | yes | newest wins: compare `rating_updated` vs Plex `lastRatedAt`; if `rating_updated` is missing, use the `conflict:` config |
 
 After the action succeeds (ordering contract: never before), the item's
