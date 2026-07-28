@@ -30,7 +30,9 @@ class TestPlaylists(PlaylistBase):
     def test_creates_playlist_in_query_order(self):
         a = FakeTrack(1, ["/plex/A/a.mp3"])
         b = FakeTrack(2, ["/plex/B/b.mp3"])
-        plugin = self.setup_plex([a, b], [{"name": "mix", "query": "title:t artist+"}])
+        # A descending sort, so the expected order contradicts beets'
+        # default ordering and the test fails if the sort is dropped.
+        plugin = self.setup_plex([a, b], [{"name": "mix", "query": "title:t artist-"}])
         self.add_item(path=b"/music/B/b.mp3", title="t", artist="zz")
         self.add_item(path=b"/music/A/a.mp3", title="t", artist="aa")
 
@@ -38,7 +40,7 @@ class TestPlaylists(PlaylistBase):
 
         playlists = plugin._server.playlists()
         assert len(playlists) == 1
-        assert [t.ratingKey for t in playlists[0].items()] == [1, 2]
+        assert [t.ratingKey for t in playlists[0].items()] == [2, 1]
 
     def test_rebuilds_when_content_differs(self):
         a = FakeTrack(1, ["/plex/A/a.mp3"])
@@ -269,3 +271,10 @@ class TestPlaylists(PlaylistBase):
         self.run_command("plex", "playlists", "--pretend")
 
         assert plugin._server.playlists() == []
+
+
+class TestPlaylistEntryValidation(PlaylistBase):
+    def test_entry_without_a_query_is_rejected(self):
+        self.setup_plex([], [{"name": "mix"}])
+        with pytest.raises(ui.UserError):
+            self.run_command("plex", "playlists")

@@ -143,3 +143,42 @@ class TestStatus(IOMixin, PluginTestHelper):
         output = self.run_with_output("plex", "status", "title:keepme")
 
         assert "items: 1 matched, 0 unmatched" in output
+
+
+class TestServerConnection(PluginTestHelper):
+    plugin = "plex"
+
+    def test_builds_the_configured_url_and_passes_the_token(self, monkeypatch):
+        import plexapi.server
+        from beets import config
+
+        config["plex"]["host"] = "nas.local"
+        config["plex"]["port"] = 32500
+        config["plex"]["secure"] = True
+        config["plex"]["token"] = "sekrit"
+        seen = {}
+
+        class Recorder:
+            def __init__(self, baseurl, token):
+                seen["baseurl"] = baseurl
+                seen["token"] = token
+
+        monkeypatch.setattr(plexapi.server, "PlexServer", Recorder)
+        plugin = plex_plugin()
+        plugin._server = None
+        plugin.server()
+
+        assert seen == {"baseurl": "https://nas.local:32500", "token": "sekrit"}
+
+    def test_connection_failure_becomes_a_clean_user_error(self, monkeypatch):
+        import plexapi.server
+
+        def boom(baseurl, token):
+            raise OSError("refused")
+
+        monkeypatch.setattr(plexapi.server, "PlexServer", boom)
+        plugin = plex_plugin()
+        plugin._server = None
+
+        with pytest.raises(ui.UserError):
+            plugin.server()

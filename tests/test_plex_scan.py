@@ -155,3 +155,46 @@ class TestScanCommand(ScanBase):
         self.setup_plex()
         with pytest.raises(ui.UserError):
             self.run_command("plex", "scan")
+
+
+class TestScanWiring(ScanBase):
+    def test_cli_exit_triggers_the_queued_scan(self):
+        # Without this, the whole auto-scan feature could be unwired and
+        # every other scan test would still pass.
+        plugin = self.setup_plex()
+        item = self.add_item(path=b"/music/A/a.mp3")
+        plugin_registry.send("item_imported", lib=self.lib, item=item)
+
+        plugin_registry.send("cli_exit", lib=self.lib)
+
+        assert plugin._server._section.update_calls == ["/plex/A"]
+
+    def test_note_path_survives_a_broken_directory_config(self, monkeypatch):
+        plugin = self.setup_plex()
+
+        def boom():
+            raise ValueError("bad config")
+
+        monkeypatch.setattr(plugin, "dirs", boom)
+        item = self.add_item(path=b"/music/A/a.mp3")
+
+        plugin_registry.send("item_imported", lib=self.lib, item=item)
+
+        assert plugin._scan_dirs == set()
+
+    def test_full_scan_failure_does_not_escape_cli_exit(self):
+        plugin = self.setup_plex()
+        section = plugin._server._section
+
+        def boom(path=None):
+            raise RuntimeError("nope")
+
+        section.update = boom
+        plugin._scan_dirs = {f"/plex/d{i}" for i in range(25)}
+
+        scan.flush(plugin)  # must not raise
+
+    def test_scan_accepts_the_library_root(self):
+        plugin = self.setup_plex()
+        self.run_command("plex", "scan", "/music")
+        assert plugin._server._section.update_calls == ["/plex"]

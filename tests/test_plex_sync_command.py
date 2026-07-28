@@ -323,3 +323,45 @@ class TestSyncCommand(SyncBase):
         item_b.load()
         assert item_a["rating"] == 9.0
         assert not item_b.get("rating")
+
+
+class TestSyncConflicts(SyncBase):
+    def test_recency_beats_the_policy_through_the_database(self):
+        # rating_updated must survive the round trip through SQLite as a
+        # number: without its types.DATE declaration this comparison
+        # raises TypeError against the stored string.
+        import time
+
+        track = FakeTrack(
+            7, ["/plex/A/a.mp3"], userRating=4.0, lastRatedAt=datetime(2020, 1, 1)
+        )
+        self.setup_plex([track])
+        item = self.add_track_item(
+            "A/a.mp3",
+            rating=9.0,
+            plex_userrating=6.0,
+            rating_updated=time.time(),
+        )
+        item.store()
+
+        self.run_command("plex", "sync")
+
+        # beets is newer, so its rating wins over the Plex-side change.
+        assert track.rate_calls == [9.0]
+
+    def test_a_transport_error_is_handled_like_a_plex_error(self):
+        import requests
+
+        track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=None)
+
+        def broken_rate(value):
+            raise requests.exceptions.ConnectionError("no route")
+
+        track.rate = broken_rate
+        plugin = self.setup_plex([track])
+        self.add_track_item("A/a.mp3", rating=8.0)
+
+        counts = sync.run(plugin, self.lib, _Opts(), [])
+
+        assert counts["failed"] == 1
+        assert counts["pushed"] == 0

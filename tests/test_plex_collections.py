@@ -240,3 +240,33 @@ class TestCollections(CollectionBase):
 
         assert "collection(s)" in str(excinfo.value)
         assert "playlist" not in str(excinfo.value)
+
+
+class TestEntryValidation(CollectionBase):
+    def test_entry_without_a_query_is_rejected(self):
+        # An absent key would otherwise mean the empty query, which
+        # matches the whole library.
+        self.setup_plex([], [{"name": "Top2000"}])
+        with pytest.raises(ui.UserError):
+            self.run_command("plex", "collections")
+
+    def test_collection_failures_set_a_non_zero_exit(self):
+        a = FakeTrack(1, ["/plex/A/a.mp3"])
+        self.setup_plex([a], [{"name": "Bad", "query": "title:orphan"}])
+        self.add_item(path=b"/music/C/orphan.mp3", title="orphan")
+
+        with pytest.raises(ui.UserError):
+            self.run_command("plex", "collections")
+
+    def test_pretend_does_not_delete_duplicates(self):
+        a = FakeTrack(1, ["/plex/A/a.mp3"])
+        plugin = self.setup_plex([a], [{"name": "Top2000", "query": ""}])
+        section = self.section(plugin)
+        first = FakeCollection(section, "Top2000", [a])
+        second = FakeCollection(section, "Top2000", [FakeTrack(9, ["/x"])])
+        section._collections.extend([first, second])
+        self.add_item(path=b"/music/A/a.mp3", title="t")
+
+        self.run_command("plex", "collections", "--pretend")
+
+        assert section.collections() == [first, second]
