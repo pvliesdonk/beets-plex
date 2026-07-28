@@ -1,5 +1,6 @@
 """Synchronize the beets library with a Plex music library."""
 
+import os
 import time
 from contextlib import contextmanager
 from typing import ClassVar
@@ -7,6 +8,8 @@ from typing import ClassVar
 from beets import config, ui
 from beets.dbcore import types
 from beets.plugins import BeetsPlugin
+
+from . import match
 
 SUBCOMMANDS = ("sync", "playlists", "collections", "scan", "status")
 
@@ -47,6 +50,11 @@ class PlexPlugin(BeetsPlugin):
         self._suspend_rating_stamp = False
         self._scan_dirs = set()
         self.register_listener("write", self.on_write)
+        self.register_listener("item_imported", self._on_item_event)
+        self.register_listener("album_imported", self._on_album_imported)
+        self.register_listener("item_moved", self._on_item_moved)
+        self.register_listener("item_removed", self._on_item_event)
+        self.register_listener("cli_exit", self._on_cli_exit)
 
     # -- rating change tracking ----------------------------------------
 
@@ -137,6 +145,46 @@ class PlexPlugin(BeetsPlugin):
         from . import collections
 
         collections.run(self, lib, opts, args)
+
+    # -- auto-scan -----------------------------------------------------
+
+    def _note_path(self, item_path):
+        beets_dir, plex_dir = self.dirs()
+        target = match.plex_path(item_path, beets_dir, plex_dir)
+        if target:
+            self._scan_dirs.add(os.path.dirname(target))
+
+    def _on_item_event(self, item, lib=None):
+        self._note_path(item.path)
+
+    def _on_album_imported(self, lib, album):
+        for item in album.items():
+            self._note_path(item.path)
+
+    def _on_item_moved(self, item, source, destination):
+        self._note_path(source)
+        self._note_path(destination)
+
+    def _on_cli_exit(self, lib):
+        from . import scan
+
+        scan.flush(self)
+
+    def cmd_scan(self, lib, opts, args):
+        music = self.music()
+        if getattr(opts, "full", False):
+            music.update()
+            ui.print_("plex: full section scan started")
+            return
+        if not args:
+            raise ui.UserError("plex scan: give beets-side PATHs or --full")
+        beets_dir, plex_dir = self.dirs()
+        for arg in args:
+            target = match.plex_path(os.path.abspath(arg), beets_dir, plex_dir)
+            if target is None:
+                raise ui.UserError(f"plex scan: {arg} is outside the beets directory")
+            music.update(path=target)
+            ui.print_(f"plex: scan started for {target}")
 
     def _dispatch(self, lib, opts, args):
         if not args:
