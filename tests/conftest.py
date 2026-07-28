@@ -1,0 +1,30 @@
+import pytest
+from beets.test._common import DummyIO
+from beets.util import cached_classproperty
+
+
+@pytest.fixture(autouse=True)
+def _reset_model_type_cache():
+    """Recompute Item._types/_fields per test.
+
+    beets caches the plugin-contributed flexible-field types on the model
+    class the first time they are read. A test that touches Item without
+    loading plugins would otherwise freeze an empty type map for the rest
+    of the session, silently turning typed queries into substring ones.
+    """
+    cached_classproperty.cache.clear()
+    yield
+    cached_classproperty.cache.clear()
+
+
+@pytest.fixture
+def io(request, monkeypatch, capteesys):
+    """Provide the `io` fixture that beets' IOMixin expects.
+
+    beets ships IOMixin in its wheel but defines the fixture only in its
+    own conftest, so downstream test suites must supply it themselves.
+    """
+    dummy = DummyIO(monkeypatch, capteesys)
+    if request.instance is not None:
+        request.instance.io = dummy
+    return dummy
