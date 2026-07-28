@@ -3,6 +3,9 @@
 import time
 from dataclasses import dataclass
 
+from beets.library import Item
+from beets.util import syspath
+from mediafile import MediaFile
 from plexapi.exceptions import PlexApiException
 from requests.exceptions import RequestException
 
@@ -59,6 +62,28 @@ def decide(base, beets_value, plex_value, rating_updated, plex_lastratedat, conf
     if beets_wins:
         return Decision(PUSH, beets_val, by_policy)
     return Decision(PULL, plex_val, by_policy)
+
+
+def tag_holds(item, value):
+    """Did the rating actually reach the file?
+
+    `item.try_write()` reports success even for formats mediafile has no
+    rating style for (ASF/WMA, AIFF, WAV): it writes nothing and returns
+    True. Trusting that advances the sync base for a file that has no
+    rating tag, and a later `beet update` then reads the rating back as
+    unrated, so the following sync pushes that phantom clear to Plex and
+    erases the real rating there.
+
+    When ratingtag is not enabled, no tag is expected in the first place
+    and ratings are database-only, so there is nothing to verify.
+    """
+    if "rating" not in Item._media_fields:
+        return True
+    try:
+        stored = MediaFile(syspath(item.path)).rating
+    except Exception:
+        return False
+    return normalize(stored) == normalize(value)
 
 
 def _update_mirrors(item, track, agreed_value, rated_at=None):
@@ -179,10 +204,12 @@ def run(plugin, lib, opts, args):
             # the rating permanently missing from the file.
             with plugin.suspend_stamp():
                 written = item.try_write()
-            if not written:
+            if not written or not tag_holds(item, decision.value):
                 counts["failed"] += 1
                 plugin._log.warning(
-                    "plex: tag write failed for {0}; not advancing sync state", item
+                    "plex: the rating did not reach the file for {0}; not "
+                    "advancing sync state (does this format support ratings?)",
+                    item,
                 )
                 continue
             counts["pulled"] += 1

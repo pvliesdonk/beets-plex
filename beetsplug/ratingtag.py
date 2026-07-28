@@ -25,10 +25,15 @@ log = logging.getLogger("beets.ratingtag")
 
 
 def rating_from_popm(raw):
-    """POPM byte (0-255) to canonical 0-10 float; 0/None means unrated."""
+    """POPM byte (0-255) to canonical 0-10 float; 0/None means unrated.
+
+    A rated byte never decays to 0.0, which everything here treats as
+    unrated: byte 1 is Windows Media Player's one star, and rounding it
+    to 0.0 would make the next write delete the user's POPM frame.
+    """
     if not raw:
         return None
-    return round(float(raw) * 10.0 / 255.0, 1)
+    return max(0.1, round(float(raw) * 10.0 / 255.0, 1))
 
 
 def rating_to_popm(value):

@@ -22,6 +22,15 @@ def test_vorbis_roundtrip_is_exact_for_half_stars(value):
     assert rating_from_vorbis(rating_to_vorbis(value)) == value
 
 
+@pytest.mark.parametrize("raw", [1, 2, 3])
+def test_popm_low_bytes_stay_rated(raw):
+    # Byte 1 is Windows Media Player's one star. Rounding it to 0.0 would
+    # mean "unrated", and the next write would delete the user's frame.
+    value = rating_from_popm(raw)
+    assert value is not None
+    assert value > 0
+
+
 def test_popm_zero_and_none_read_as_unrated():
     assert rating_from_popm(0) is None
     assert rating_from_popm(None) is None

@@ -10,6 +10,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from beets import ui
 from beets.library import Item
 from beets.test.helper import PluginMixin, TestHelper
 
@@ -58,6 +59,24 @@ class TestBothPlugins(PluginMixin, TestHelper):
 
         # Read the file back through a fresh Item: the tag, not the DB.
         assert Item.from_path(item.path)["rating"] == 9.0
+
+    def test_a_format_that_cannot_hold_a_rating_does_not_advance_the_base(self):
+        # try_write() reports success for formats mediafile has no rating
+        # style for, writing nothing. If the base advanced anyway, a later
+        # `beet update` would read the rating back as unrated and the next
+        # sync would push that clear to Plex, destroying the real rating.
+        track = FakeTrack(7, ["/plex/A/a.wma"], userRating=9.0)
+        self._setup([track])
+        dst = self.music_dir / "A" / "a.wma"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(RSRC / "full.wma", dst)
+        item = self.add_item(path=str(dst).encode())
+
+        with pytest.raises(ui.UserError):  # non-zero exit: the item failed
+            self.run_command("plex", "sync")
+
+        item.load()
+        assert not item.get("plex_userrating")
 
     def test_rating_cleared_in_plex_clears_the_file_tag(self):
         track = FakeTrack(7, ["/plex/A/a.flac"], userRating=None)

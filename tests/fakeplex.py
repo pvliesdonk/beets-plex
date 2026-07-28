@@ -1,6 +1,6 @@
 """In-memory stand-ins for the plexapi objects the plex plugin touches."""
 
-from plexapi.exceptions import NotFound
+from plexapi.exceptions import BadRequest, NotFound
 
 
 class FakeTrack:
@@ -123,12 +123,18 @@ class FakeServer:
         ]
 
     def createPlaylist(self, title, items=None, **kwargs):
-        playlist = FakePlaylist(self, title, items or [])
+        # Real Playlist.create refuses an empty item list.
+        if not items:
+            raise BadRequest("Must include items to add when creating new playlist")
+        playlist = FakePlaylist(self, title, items)
         self._playlists.append(playlist)
         return playlist
 
-    def createCollection(self, title, section=None, items=None, **kwargs):
-        section = section or self._section
-        collection = FakeCollection(section, title, items or [])
+    def createCollection(self, title, section, items=None, **kwargs):
+        # `section` is positional and required on the real server, and an
+        # empty item list is refused, as for playlists.
+        if not items:
+            raise BadRequest("Must include items to add when creating new collection")
+        collection = FakeCollection(section, title, items)
         section._collections.append(collection)
         return collection

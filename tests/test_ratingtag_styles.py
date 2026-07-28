@@ -136,6 +136,25 @@ def test_popm_foreign_email_frames_are_ignored_and_preserved(media_path):
     assert frames["beets@example.com"] == 128
 
 
+def test_popm_one_star_survives_a_read_write_round_trip(media_path):
+    # A Windows Media Player one-star file must not lose its rating just
+    # because beets read and rewrote the tags.
+    path = media_path("mp3")
+    f = mutagen.File(path)
+    f.tags.add(mutagen.id3.POPM(email="beets@example.com", rating=1))
+    f.save()
+
+    style = PopmRatingStorageStyle("beets@example.com")
+    f = mutagen.File(path)
+    value = style.get(f)
+    style.set(f, value)
+    f.save()
+
+    frames = mutagen.File(path).tags.getall("POPM")
+    assert [fr.email for fr in frames] == ["beets@example.com"]
+    assert frames[0].rating > 0
+
+
 def test_popm_zero_rating_reads_as_unrated(media_path):
     path = media_path("mp3")
     f = mutagen.File(path)
