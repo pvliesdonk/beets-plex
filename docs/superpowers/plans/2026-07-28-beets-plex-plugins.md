@@ -4,7 +4,7 @@
 
 **Goal:** Two beets plugins in one package: `ratingtag` (rating field + file-tag storage) and `plex` (Plex library sync: ratings, play stats, playlists, collections, partial scans).
 
-**Architecture:** See the approved spec at `docs/superpowers/specs/2026-07-28-beets-plex-design.md` — read it before starting. `beetsplug/ratingtag.py` owns the `rating` field and its POPM/Vorbis/MP4 tag storage; `beetsplug/plex/` is a package (plugin wiring, `match.py`, `sync.py`, `playlists.py`, `collections.py`, `scan.py`) that talks to Plex through python-plexapi and matches tracks by file path only. All Plex tests run against in-memory fakes in `tests/fakeplex.py`; no live server.
+**Architecture:** See the approved spec at `docs/superpowers/specs/2026-07-28-beets-plex-design.md`, read it before starting. `beetsplug/ratingtag.py` owns the `rating` field and its POPM/Vorbis/MP4 tag storage; `beetsplug/plex/` is a package (plugin wiring, `match.py`, `sync.py`, `playlists.py`, `collections.py`, `scan.py`) that talks to Plex through python-plexapi and matches tracks by file path only. All Plex tests run against in-memory fakes in `tests/fakeplex.py`; no live server.
 
 **Tech Stack:** Python >= 3.10, beets >= 2.12, python-plexapi, mediafile 0.17 / mutagen (already beets dependencies), hatchling build, uv for env management, pytest with `beets.test.helper`, ruff.
 
@@ -16,17 +16,17 @@
 - Rating scale is canonically float 0-10; **unrated is 0.0 or an absent field, equivalent everywhere**. Tags: POPM 0-255 linear (MP3), `RATING` Vorbis comment 0-100 (FLAC/Ogg/Opus; legacy values <= 5 are a 0-5 star scale on read), `----:com.apple.iTunes:RATING` 0-100 (MP4). Writing an unrated value deletes the tag.
 - Field names and types must match the spec's field table exactly (`plex_ratingkey` INTEGER, `plex_userrating` FLOAT, dates as `types.DATE` storing epoch floats, etc.).
 - Plugin config lives in the shared `plex:` section for the plex plugin and `ratingtag:` for ratingtag. The `token` value is marked `redact = True`.
-- Beets plugin logging uses `self._log.debug("found {0}", n)` str.format templates — never f-strings or %-interpolation in log calls.
+- Beets plugin logging uses `self._log.debug("found {0}", n)` str.format templates, never f-strings or %-interpolation in log calls.
 - No dependencies beyond `beets`, `plexapi`, `mediafile`, `mutagen` (runtime) and `pytest`, `ruff` (dev).
 - API facts verified against installed sources (do not re-derive; they are correct for beets 2.12 / mediafile 0.17):
-  - `beets.test.helper.PluginTestHelper` exists; class attr `plugin: ClassVar[str]` auto-loads the plugin per test. `TestHelper.add_item(**values)` adds an item to `self.lib`. `RunMixin.run_command(*args)` runs the CLI in-process. beets' bundled fixture dir (RSRC) is NOT shipped in the wheel — use this repo's own `tests/rsrc/` fixtures.
+  - `beets.test.helper.PluginTestHelper` exists; class attr `plugin: ClassVar[str]` auto-loads the plugin per test. `TestHelper.add_item(**values)` adds an item to `self.lib`. `RunMixin.run_command(*args)` runs the CLI in-process. beets' bundled fixture dir (RSRC) is NOT shipped in the wheel, use this repo's own `tests/rsrc/` fixtures.
   - `database_change` fires AFTER the dirty set is cleared; the `write` event fires while `item._dirty` is still populated. Rating-change stamping therefore uses the `write` event.
-  - `mediafile.MediaField(*styles, out_type=...)` is a descriptor; `MediaField.__get__` returns the first truthy style value passed through `safe_cast` (None stays None). `MediaField.__set__(None)` converts to `_none_value()` (0.0 for float) before calling each style's `set` — so styles receive 0.0, never None.
-  - `mediafile.StorageStyle` base handles FLAC + all Ogg formats (`formats` list); `MP3StorageStyle.formats = ["MP3", "AIFF", "DSF", "WAVE"]`; `MP4StorageStyle` serializes `----`-freeform values to bytes inside `serialize()` — always go through `super().set()` for MP4, never `store()` directly with a str.
-  - `BeetsPlugin.add_media_field(name, descriptor)` registers the field on `MediaFile` AND adds it to `Item._media_fields`; it raises `ValueError` if the name is already registered, and mediafile class-level registration survives plugin unload — the plugin must tolerate re-registration (catch `ValueError`).
+  - `mediafile.MediaField(*styles, out_type=...)` is a descriptor; `MediaField.__get__` returns the first truthy style value passed through `safe_cast` (None stays None). `MediaField.__set__(None)` converts to `_none_value()` (0.0 for float) before calling each style's `set`, so styles receive 0.0, never None.
+  - `mediafile.StorageStyle` base handles FLAC + all Ogg formats (`formats` list); `MP3StorageStyle.formats = ["MP3", "AIFF", "DSF", "WAVE"]`; `MP4StorageStyle` serializes `----`-freeform values to bytes inside `serialize()`, always go through `super().set()` for MP4, never `store()` directly with a str.
+  - `BeetsPlugin.add_media_field(name, descriptor)` registers the field on `MediaFile` AND adds it to `Item._media_fields`; it raises `ValueError` if the name is already registered, and mediafile class-level registration survives plugin unload, the plugin must tolerate re-registration (catch `ValueError`).
   - `Item.write()` writes only fields present in `dict(item)` intersected with `_media_fields`.
   - plexapi: `track.rate(value)` sets `userRating` and bumps `lastRatedAt`; `rate(None)` clears. `section.update(path=...)` partial-scans one folder. `section.searchTracks(container_size=N)` returns all tracks with `locations`, `userRating`, `lastRatedAt`, `viewCount`, `skipCount`, `lastViewedAt`, `guid` populated (no lazy reloads for these).
-  - `ui.decargs` is deprecated — use `args` directly. Queries: `lib.items(args)` accepts a list of query parts; `parse_query_string(s, Item)` returns `(query, sort)`.
+  - `ui.decargs` is deprecated, use `args` directly. Queries: `lib.items(args)` accepts a list of query parts; `parse_query_string(s, Item)` returns `(query, sort)`.
 
 ---
 
@@ -124,7 +124,7 @@ ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 0.3 -c:a wmav2 -y tests/rsrc/full
 The `.wma` file is the "format without a rating storage style" fixture (ASF is
 in none of the three styles' `formats` lists).
 
-Note: the generated MP3 has no ID3 tag at all (`mutagen.File(...).tags is None`) — this is intentional; the POPM code must handle tagless files, and a test covers it.
+Note: the generated MP3 has no ID3 tag at all (`mutagen.File(...).tags is None`), this is intentional; the POPM code must handle tagless files, and a test covers it.
 
 - [ ] **Step 5: Write a scaffolding test**
 
@@ -720,7 +720,7 @@ class TestRatingTagPlugin(PluginTestHelper):
 - [ ] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_ratingtag_plugin.py -q`
-Expected: FAIL — the module has no BeetsPlugin subclass, so plugin loading errors.
+Expected: FAIL, the module has no BeetsPlugin subclass, so plugin loading errors.
 
 - [ ] **Step 3: Implement the plugin class**
 
@@ -1081,7 +1081,7 @@ class TestPlexPluginSkeleton(PluginTestHelper):
 - [ ] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_plex_plugin.py -q`
-Expected: FAIL — `beetsplug.plex` does not exist.
+Expected: FAIL, `beetsplug.plex` does not exist.
 
 - [ ] **Step 3: Implement the skeleton**
 
@@ -1237,7 +1237,7 @@ git commit -m "feat(plex): plugin skeleton with config, fields, connection, disp
 - Produces:
   - `plex_path(item_path: bytes | str, beets_dir: str, plex_dir: str) -> str | None` (None when outside beets_dir).
   - `build_path_map(music, container_size=1000) -> dict[str, Track]` (every track location maps to its track).
-  - `resolve(item, path_map, beets_dir, plex_dir) -> Track | None` — path-map is authoritative; the `plex_ratingkey` DB field is a mirror written by sync, never trusted for resolution.
+  - `resolve(item, path_map, beets_dir, plex_dir) -> Track | None`, path-map is authoritative; the `plex_ratingkey` DB field is a mirror written by sync, never trusted for resolution.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1372,7 +1372,7 @@ git commit -m "feat(plex): path-based track matching"
 - Produces:
   - constants `NONE = "none"`, `PULL = "pull"`, `PUSH = "push"`.
   - `normalize(value) -> float` (None -> 0.0, else round(float, 1)).
-  - `Decision(action: str, value: float)` dataclass — `value` is always the final agreed rating (what `plex_userrating` becomes after the action).
+  - `Decision(action: str, value: float)` dataclass, `value` is always the final agreed rating (what `plex_userrating` becomes after the action).
   - `decide(base, beets_value, plex_value, rating_updated, plex_lastratedat, conflict) -> Decision` where `rating_updated` is an epoch float or None, `plex_lastratedat` a datetime or None, `conflict` is `"plex"` or `"beets"`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1559,7 +1559,7 @@ git commit -m "feat(plex): three-way rating merge decision logic"
 
 **Interfaces:**
 - Consumes: `plugin.suspend_stamp()` from Task 7.
-- Produces: `PlexPlugin.on_write(item, path, tags)` registered for the `write` event; stamps `item.rating_updated = time.time()` when `"rating" in item._dirty` and the guard is off. (The `write` event fires before the store, while the dirty set is populated; `database_change` fires after it is cleared — see the spec.)
+- Produces: `PlexPlugin.on_write(item, path, tags)` registered for the `write` event; stamps `item.rating_updated = time.time()` when `"rating" in item._dirty` and the guard is off. (The `write` event fires before the store, while the dirty set is populated; `database_change` fires after it is cleared, see the spec.)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1608,7 +1608,7 @@ class TestRatingStamp(PluginTestHelper):
 - [ ] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_plex_stamp.py -q`
-Expected: FAIL — `on_write` does not exist.
+Expected: FAIL, `on_write` does not exist.
 
 - [ ] **Step 3: Implement the listener**
 
@@ -1809,7 +1809,7 @@ class TestSyncCommand(SyncBase):
 - [ ] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_plex_sync_command.py -q`
-Expected: FAIL — `cmd_sync` missing, so dispatch raises UserError.
+Expected: FAIL, `cmd_sync` missing, so dispatch raises UserError.
 
 - [ ] **Step 3: Implement the command**
 
@@ -1899,7 +1899,7 @@ def run(plugin, lib, opts, args):
     )
 ```
 
-Add to `PlexPlugin` in `beetsplug/plex/__init__.py` (with `from . import sync` — import inside the method to avoid import cycles at module load):
+Add to `PlexPlugin` in `beetsplug/plex/__init__.py` (with `from . import sync`, import inside the method to avoid import cycles at module load):
 
 ```python
     def cmd_sync(self, lib, opts, args):
@@ -1911,7 +1911,7 @@ Add to `PlexPlugin` in `beetsplug/plex/__init__.py` (with `from . import sync` �
 - [ ] **Step 4: Run to verify pass**
 
 Run: `uv run pytest tests/test_plex_sync_command.py -q` then `uv run pytest -q`
-Expected: all PASS. If `add_item(path=...)` stores the path differently than expected (bytes vs str), normalize in the test helper `add_track_item` by passing `path=f"/music/{relpath}".encode()` — beets stores paths as bytes.
+Expected: all PASS. If `add_item(path=...)` stores the path differently than expected (bytes vs str), normalize in the test helper `add_track_item` by passing `path=f"/music/{relpath}".encode()`, beets stores paths as bytes.
 
 - [ ] **Step 5: Lint and commit**
 
@@ -2070,7 +2070,7 @@ class TestPlaylists(PlaylistBase):
 - [ ] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_plex_playlists.py -q`
-Expected: FAIL — `cmd_playlists` missing.
+Expected: FAIL, `cmd_playlists` missing.
 
 - [ ] **Step 3: Implement playlists.py**
 
@@ -2316,7 +2316,7 @@ class TestCollections(CollectionBase):
 - [ ] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_plex_collections.py -q`
-Expected: FAIL — `cmd_collections` missing.
+Expected: FAIL, `cmd_collections` missing.
 
 - [ ] **Step 3: Implement collections.py**
 
@@ -2564,7 +2564,7 @@ class TestScanCommand(ScanBase):
 - [ ] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_plex_scan.py -q`
-Expected: FAIL — `beetsplug.plex.scan` missing.
+Expected: FAIL, `beetsplug.plex.scan` missing.
 
 - [ ] **Step 3: Implement scan.py and wire the listeners**
 
@@ -2752,22 +2752,22 @@ Expected: all PASS.
 Replace `README.md` with user-facing documentation containing exactly these
 sections (prose can be adjusted, structure and facts must match):
 
-1. **What this is** — two beets plugins: `ratingtag` (rating field 0-10,
+1. **What this is**, two beets plugins: `ratingtag` (rating field 0-10,
    written to POPM / Vorbis RATING / MP4 RATING tags) and `plex` (path-based
    sync with a Plex music library: two-way ratings, play-stat pull, playlist
    push, track-collection sync, partial library scans). Files must be shared
    between beets and Plex (same share, possibly different mount prefixes).
-2. **Install** — `pip install .` (or add the repo's `beetsplug/` dir to
+2. **Install**, `pip install .` (or add the repo's `beetsplug/` dir to
    `pluginpath` for development), then add `ratingtag` and `plex` to the
    `plugins:` list. Note: remove `plexupdate` from the plugins list and
    remove any `rating` entry from the `types:` plugin config.
-3. **Configuration** — the full annotated `plex:` and `ratingtag:` YAML from
+3. **Configuration**, the full annotated `plex:` and `ratingtag:` YAML from
    the spec's Config section (copy the keys and defaults verbatim).
-4. **Commands** — the five subcommands with one-line descriptions and the
+4. **Commands**, the five subcommands with one-line descriptions and the
    `--pretend/--pull/--push/--full` flags.
-5. **How matching works** — three sentences: path prefix translation,
+5. **How matching works**, three sentences: path prefix translation,
    one-sweep path map, unmatched items are reported and skipped.
-6. **Rating semantics** — 0-10 scale, 0.0/absent = unrated, newest-wins
+6. **Rating semantics**, 0-10 scale, 0.0/absent = unrated, newest-wins
    conflict resolution with the `conflict:` fallback, the `beet modify -W`
    stamping limitation.
 

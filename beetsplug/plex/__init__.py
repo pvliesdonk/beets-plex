@@ -164,8 +164,15 @@ class PlexPlugin(BeetsPlugin):
     # -- auto-scan -----------------------------------------------------
 
     def _note_path(self, item_path):
-        beets_dir, plex_dir = self.dirs()
-        target = match.plex_path(item_path, beets_dir, plex_dir)
+        # Runs inside beets' import/move/remove events, which beets does not
+        # guard, so a malformed beets_dir/plex_dir must not break the user's
+        # command. The scan itself reports the failure at exit.
+        try:
+            beets_dir, plex_dir = self.dirs()
+            target = match.plex_path(item_path, beets_dir, plex_dir)
+        except Exception as exc:
+            self._log.warning("plex: cannot queue a scan for this change: {0}", exc)
+            return
         if target:
             self._scan_dirs.add(os.path.dirname(target))
 

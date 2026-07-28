@@ -116,6 +116,30 @@ class TestPlaylists(PlaylistBase):
         with pytest.raises(ui.UserError):
             self.run_command("plex", "playlists", "nope")
 
+    def test_duplicate_titles_are_collapsed_to_one(self):
+        # An interrupted earlier run can leave two playlists with the same
+        # title; every stale one must go, not just the first.
+        a = FakeTrack(1, ["/plex/A/a.mp3"])
+        plugin = self.setup_plex([a], [{"name": "mix", "query": ""}])
+        plugin._server.createPlaylist("mix", items=[a])
+        plugin._server.createPlaylist("mix", items=[FakeTrack(9, ["/x"])])
+        self.add_item(path=b"/music/A/a.mp3", title="t")
+
+        self.run_command("plex", "playlists")
+
+        playlists = plugin._server.playlists()
+        assert len(playlists) == 1
+        assert [t.ratingKey for t in playlists[0].items()] == [1]
+
+    def test_empty_query_deletes_every_duplicate(self):
+        plugin = self.setup_plex([], [{"name": "mix", "query": "title:none"}])
+        plugin._server.createPlaylist("mix", items=[FakeTrack(9, ["/x"])])
+        plugin._server.createPlaylist("mix", items=[FakeTrack(8, ["/y"])])
+
+        self.run_command("plex", "playlists")
+
+        assert plugin._server.playlists() == []
+
     def test_total_match_failure_does_not_delete_the_playlist(self):
         # Every item unresolvable (e.g. a wrong plex_dir) must not be
         # mistaken for an empty query and delete the playlist.

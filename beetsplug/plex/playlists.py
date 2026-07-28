@@ -99,7 +99,13 @@ def _apply(plugin, server, name, tracks, pretend):
 
     current = same_name[0] if same_name else None
     desired = [t.ratingKey for t in tracks]
-    if current is not None and [t.ratingKey for t in current.items()] == desired:
+    # Only a single playlist with this title, already correct, is a no-op.
+    # Duplicates must be collapsed even when the first one matches.
+    if (
+        len(same_name) == 1
+        and [t.ratingKey for t in current.items()] == desired
+        and desired
+    ):
         plugin._log.info("plex: playlist {0} unchanged", name)
         return
 
@@ -107,16 +113,16 @@ def _apply(plugin, server, name, tracks, pretend):
         ui.print_(f"plex: would rebuild playlist {name} ({len(tracks)} tracks)")
         return
     if tracks:
-        # Create the replacement before removing the old one: if the create
+        # Create the replacement before removing the old ones: if the create
         # fails, the user still has the previous playlist rather than none.
-        # Plex tolerates two playlists sharing a title for that moment.
+        # Plex tolerates playlists sharing a title for that moment.
         server.createPlaylist(name, items=tracks)
-        if current is not None:
-            current.delete()
         plugin._log.info(
             "plex: playlist {0} rebuilt with {1} tracks", name, len(tracks)
         )
     else:
-        if current is not None:
-            current.delete()
         plugin._log.warning("plex: playlist {0} removed (query matched nothing)", name)
+    # Delete every pre-existing playlist of this title, not just the first:
+    # an interrupted earlier run can leave duplicates behind.
+    for stale in same_name:
+        stale.delete()
