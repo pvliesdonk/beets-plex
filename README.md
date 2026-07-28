@@ -119,8 +119,9 @@ an unrated value removes the tag from the file rather than writing a zero.
 `userRating`, and `plex_userrating`, which records what the two agreed on at
 the last sync. If only one side changed, that change propagates. If both
 changed, the more recent one wins, comparing beets' `rating_updated` timestamp
-against Plex's `lastRatedAt`. If no beets timestamp is available, the
-`conflict:` setting decides (default: Plex wins).
+against Plex's `lastRatedAt`. If either timestamp is missing, the `conflict:`
+setting decides instead (default: Plex wins). Plex drops `lastRatedAt` when a
+rating is cleared there, so that case takes this path too.
 
 `rating_updated` is recorded when beets writes a changed rating to a file, so
 `beet modify rating=8 <query>` is stamped whenever tag writing is on. It is
