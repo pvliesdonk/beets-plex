@@ -2610,51 +2610,45 @@ In `beetsplug/plex/__init__.py`, add at the top: `import os` and `from . import 
 Add the methods to `PlexPlugin`:
 
 ```python
-# -- auto-scan -----------------------------------------------------
+    # -- auto-scan -----------------------------------------------------
 
+    def _note_path(self, item_path):
+        beets_dir, plex_dir = self.dirs()
+        target = match.plex_path(item_path, beets_dir, plex_dir)
+        if target:
+            self._scan_dirs.add(os.path.dirname(target))
 
-def _note_path(self, item_path):
-    beets_dir, plex_dir = self.dirs()
-    target = match.plex_path(item_path, beets_dir, plex_dir)
-    if target:
-        self._scan_dirs.add(os.path.dirname(target))
-
-
-def _on_item_event(self, item, lib=None):
-    self._note_path(item.path)
-
-
-def _on_album_imported(self, lib, album):
-    for item in album.items():
+    def _on_item_event(self, item, lib=None):
         self._note_path(item.path)
 
+    def _on_album_imported(self, lib, album):
+        for item in album.items():
+            self._note_path(item.path)
 
-def _on_item_moved(self, item, source, destination):
-    self._note_path(source)
-    self._note_path(destination)
+    def _on_item_moved(self, item, source, destination):
+        self._note_path(source)
+        self._note_path(destination)
 
+    def _on_cli_exit(self, lib):
+        from . import scan
 
-def _on_cli_exit(self, lib):
-    from . import scan
+        scan.flush(self)
 
-    scan.flush(self)
-
-
-def cmd_scan(self, lib, opts, args):
-    music = self.music()
-    if getattr(opts, "full", False):
-        music.update()
-        ui.print_("plex: full section scan started")
-        return
-    if not args:
-        raise ui.UserError("plex scan: give beets-side PATHs or --full")
-    beets_dir, plex_dir = self.dirs()
-    for arg in args:
-        target = match.plex_path(os.path.abspath(arg), beets_dir, plex_dir)
-        if target is None:
-            raise ui.UserError(f"plex scan: {arg} is outside the beets directory")
-        music.update(path=target)
-        ui.print_(f"plex: scan started for {target}")
+    def cmd_scan(self, lib, opts, args):
+        music = self.music()
+        if getattr(opts, "full", False):
+            music.update()
+            ui.print_("plex: full section scan started")
+            return
+        if not args:
+            raise ui.UserError("plex scan: give beets-side PATHs or --full")
+        beets_dir, plex_dir = self.dirs()
+        for arg in args:
+            target = match.plex_path(os.path.abspath(arg), beets_dir, plex_dir)
+            if target is None:
+                raise ui.UserError(f"plex scan: {arg} is outside the beets directory")
+            music.update(path=target)
+            ui.print_(f"plex: scan started for {target}")
 ```
 
 Note on `test_flush_swallows_connection_errors`: with `_server = None`,

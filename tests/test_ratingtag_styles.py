@@ -1,5 +1,6 @@
 import mutagen
 import mutagen.id3
+import mutagen.mp4
 import pytest
 
 from beetsplug.ratingtag import (
@@ -60,6 +61,15 @@ def test_mp4_write_read_roundtrip(media_path):
     f.save()
     f2 = mutagen.File(path)
     assert style.get(f2) == 7.5
+
+
+def test_mp4_small_value_is_a_low_rating_not_stars(media_path):
+    # The MP4 atom is 0-100 only, so "4" means 0.4, not 4 stars (8.0).
+    path = media_path("m4a")
+    f = mutagen.File(path)
+    f["----:com.apple.iTunes:RATING"] = [mutagen.mp4.MP4FreeForm(b"4")]
+    f.save()
+    assert MP4RatingStorageStyle().get(mutagen.File(path)) == 0.4
 
 
 def test_mp4_unrated_write_removes_tag(media_path):

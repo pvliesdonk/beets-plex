@@ -30,8 +30,13 @@ def rating_to_popm(value):
     return max(1, min(255, int(round(float(value) * 25.5))))
 
 
-def rating_from_vorbis(raw):
-    """RATING comment string to canonical 0-10 float; None when unrated."""
+def rating_from_vorbis(raw, legacy=True):
+    """RATING comment string to canonical 0-10 float; None when unrated.
+
+    With `legacy` (the Vorbis default), a value of 5 or less is read as the
+    0-5 star scale some taggers write. MP4 passes `legacy=False`: that atom
+    is 0-100 only, so a small value there means a low rating, not stars.
+    """
     if raw is None:
         return None
     try:
@@ -40,7 +45,7 @@ def rating_from_vorbis(raw):
         return None
     if num <= 0:
         return None
-    if num <= 5:  # legacy 0-5 star scale
+    if legacy and num <= 5:  # legacy 0-5 star scale
         return round(num * 2.0, 1)
     return round(num / 10.0, 1)
 
@@ -126,7 +131,7 @@ class MP4RatingStorageStyle(mediafile.MP4StorageStyle):
         raw = self.fetch(mutagen_file)
         if isinstance(raw, bytes):
             raw = raw.decode("utf-8", "ignore")
-        return rating_from_vorbis(raw)
+        return rating_from_vorbis(raw, legacy=False)
 
     def set(self, mutagen_file, value):
         value = float(value or 0)
@@ -150,7 +155,9 @@ class RatingTagPlugin(BeetsPlugin):
             MP4RatingStorageStyle(),
             out_type=float,
         )
-        # mediafile keeps class-level registrations across plugin reloads
-        # in one process (e.g. the test suite), so re-registering is fine.
+        # mediafile registrations are class-level and survive plugin reloads
+        # within one process, so the first one wins and this second call is
+        # discarded (it only happens when a process loads the plugin twice,
+        # as the test suite does; each `beet` run is a fresh process).
         with contextlib.suppress(ValueError):
             self.add_media_field("rating", field)

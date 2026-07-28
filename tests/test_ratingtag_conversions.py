@@ -50,6 +50,15 @@ def test_vorbis_zero_negative_and_junk_read_as_unrated():
     assert rating_from_vorbis(None) is None
 
 
+def test_mp4_scale_has_no_legacy_star_handling():
+    # The MP4 atom is 0-100 only; a small value there is a low rating,
+    # not a star count (unlike the Vorbis RATING comment).
+    assert rating_from_vorbis("4", legacy=False) == 0.4
+    assert rating_from_vorbis("5", legacy=False) == 0.5
+    assert rating_from_vorbis("80", legacy=False) == 8.0
+    assert rating_from_vorbis("0", legacy=False) is None
+
+
 def test_vorbis_write_clamps_below_one_to_avoid_legacy_range():
     # Written values must never land in 1..5, which reads as star scale.
     assert rating_to_vorbis(0.5) == "10"

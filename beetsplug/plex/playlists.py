@@ -17,14 +17,18 @@ def configured(plugin):
     return entries
 
 
-def select(entries, names):
-    """Restrict configured entries to the requested names."""
+def select(entries, names, kind="playlist"):
+    """Restrict configured entries to the requested names.
+
+    `kind` names the entry type in the error message; collections reuse
+    this helper and must not report unknown names as playlists.
+    """
     if not names:
         return entries
     by_name = dict(entries)
     unknown = [n for n in names if n not in by_name]
     if unknown:
-        raise ui.UserError(f"plex: unknown playlist(s): {', '.join(unknown)}")
+        raise ui.UserError(f"plex: unknown {kind}(s): {', '.join(unknown)}")
     return [(n, by_name[n]) for n in names]
 
 

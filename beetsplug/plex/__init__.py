@@ -186,8 +186,12 @@ class PlexPlugin(BeetsPlugin):
         scan.flush(self)
 
     def cmd_scan(self, lib, opts, args):
+        pretend = bool(getattr(opts, "pretend", False))
         music = self.music()
         if getattr(opts, "full", False):
+            if pretend:
+                ui.print_("plex: would start a full section scan")
+                return
             music.update()
             ui.print_("plex: full section scan started")
             return
@@ -198,6 +202,9 @@ class PlexPlugin(BeetsPlugin):
             target = match.plex_path(os.path.abspath(arg), beets_dir, plex_dir)
             if target is None:
                 raise ui.UserError(f"plex scan: {arg} is outside the beets directory")
+            if pretend:
+                ui.print_(f"plex: would scan {target}")
+                continue
             music.update(path=target)
             ui.print_(f"plex: scan started for {target}")
 

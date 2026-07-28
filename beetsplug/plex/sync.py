@@ -74,7 +74,7 @@ def run(plugin, lib, opts, args):
     path_map = match.build_path_map(music)
     conflict = plugin.config["conflict"].as_str()
     pretend = bool(getattr(opts, "pretend", False))
-    counts = {"pulled": 0, "pushed": 0, "unchanged": 0, "unmatched": 0}
+    counts = {"pulled": 0, "pushed": 0, "unchanged": 0, "unmatched": 0, "failed": 0}
 
     for item in lib.items(args):
         track = match.resolve(item, path_map, beets_dir, plex_dir)
@@ -98,17 +98,21 @@ def run(plugin, lib, opts, args):
             continue
 
         if decision.action == PUSH:
-            counts["pushed"] += 1
             plugin._log.info(
                 "plex: push rating {0} for {1}", decision.value or "clear", item
             )
             if pretend:
+                counts["pushed"] += 1
                 continue
             try:
                 track.rate(decision.value if decision.value > 0 else None)
             except Exception as exc:
+                # Counted as failed, not pushed: the base is left alone so
+                # the next run retries this item.
+                counts["failed"] += 1
                 plugin._log.warning("plex: rating push failed for {0}: {1}", item, exc)
                 continue
+            counts["pushed"] += 1
         elif decision.action == PULL:
             counts["pulled"] += 1
             plugin._log.info(
@@ -129,9 +133,12 @@ def run(plugin, lib, opts, args):
                 item.try_write()
 
     plugin._log.info(
-        "plex: sync done: {0} pulled, {1} pushed, {2} unchanged, {3} unmatched",
+        "plex: sync done: {0} pulled, {1} pushed, {2} unchanged, "
+        "{3} unmatched, {4} failed",
         counts["pulled"],
         counts["pushed"],
         counts["unchanged"],
         counts["unmatched"],
+        counts["failed"],
     )
+    return counts

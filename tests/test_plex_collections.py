@@ -108,3 +108,15 @@ class TestCollections(CollectionBase):
         self.run_command("plex", "collections", "--pretend")
 
         assert self.section(plugin).collections() == []
+
+    def test_unknown_name_error_says_collection_not_playlist(self):
+        import pytest
+        from beets import ui
+
+        self.setup_plex([], [{"name": "Top2000", "query": ""}])
+
+        with pytest.raises(ui.UserError) as excinfo:
+            self.run_command("plex", "collections", "Nope")
+
+        assert "collection(s)" in str(excinfo.value)
+        assert "playlist" not in str(excinfo.value)

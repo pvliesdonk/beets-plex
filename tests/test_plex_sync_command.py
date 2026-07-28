@@ -2,8 +2,17 @@ from datetime import datetime
 
 from beets.test.helper import PluginTestHelper
 
+from beetsplug.plex import sync
 from tests.fakeplex import FakeMusicSection, FakeServer, FakeTrack
 from tests.test_plex_plugin import plex_plugin
+
+
+class _Opts:
+    """Stand-in for the optparse values object, all flags off."""
+
+    pretend = False
+    pull = False
+    push = False
 
 
 class SyncBase(PluginTestHelper):
@@ -113,6 +122,32 @@ class TestSyncCommand(SyncBase):
 
         item.load()
         assert not item.get("plex_userrating")  # retried next run
+
+    def test_push_failure_is_not_counted_as_pushed(self):
+        # The summary must not claim a push that never reached the server.
+        track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=None)
+
+        def broken_rate(value):
+            raise RuntimeError("boom")
+
+        track.rate = broken_rate
+        plugin = self.setup_plex([track])
+        self.add_track_item("A/a.mp3", rating=8.0)
+
+        counts = sync.run(plugin, self.lib, _Opts(), [])
+
+        assert counts["pushed"] == 0
+        assert counts["failed"] == 1
+
+    def test_successful_push_is_counted(self):
+        track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=None)
+        plugin = self.setup_plex([track])
+        self.add_track_item("A/a.mp3", rating=8.0)
+
+        counts = sync.run(plugin, self.lib, _Opts(), [])
+
+        assert counts["pushed"] == 1
+        assert counts["failed"] == 0
 
     def test_pull_does_not_stamp_rating_updated(self):
         track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=9.0)

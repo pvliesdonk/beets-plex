@@ -4,12 +4,19 @@ FULL_SCAN_THRESHOLD = 20
 
 
 def flush(plugin):
-    """Run the queued partial scans; never raise."""
+    """Run the queued partial scans; never raise.
+
+    Called from `cli_exit`, which beets does not guard, so everything that
+    can fail — including reading config, which raises on a malformed
+    `auto_scan` value — stays inside the try.
+    """
     dirs = sorted(plugin._scan_dirs)
     plugin._scan_dirs.clear()
-    if not dirs or not plugin.config["auto_scan"].get(bool):
+    if not dirs:
         return
     try:
+        if not plugin.config["auto_scan"].get(bool):
+            return
         music = plugin.music()
         if len(dirs) > FULL_SCAN_THRESHOLD:
             plugin._log.info(

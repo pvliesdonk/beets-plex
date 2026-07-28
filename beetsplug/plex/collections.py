@@ -26,7 +26,7 @@ def run(plugin, lib, opts, args):
     path_map = match.build_path_map(music)
     pretend = bool(getattr(opts, "pretend", False))
 
-    for name, query_string in select(configured(plugin), args):
+    for name, query_string in select(configured(plugin), args, kind="collection"):
         query, _ = parse_query_string(query_string, Item)
         tracks = []
         for item in lib.items(query):

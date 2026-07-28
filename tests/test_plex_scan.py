@@ -63,6 +63,17 @@ class TestAutoScan(ScanBase):
         scan.flush(plugin)
         assert plugin._server._section.update_calls == []
 
+    def test_flush_survives_malformed_auto_scan_config(self):
+        # flush() runs from cli_exit, which beets does not guard, so a bad
+        # config value must not traceback out of every beets command.
+        from beets import config
+
+        plugin = self.setup_plex()
+        config["plex"]["auto_scan"] = "maybe"
+        plugin._scan_dirs = {"/plex/A"}
+        scan.flush(plugin)  # must not raise
+        assert plugin._server._section.update_calls == []
+
     def test_flush_swallows_connection_errors(self):
         from beets import config
 
@@ -83,6 +94,16 @@ class TestScanCommand(ScanBase):
         plugin = self.setup_plex()
         self.run_command("plex", "scan", "/music/A")
         assert plugin._server._section.update_calls == ["/plex/A"]
+
+    def test_pretend_scans_nothing(self):
+        plugin = self.setup_plex()
+        self.run_command("plex", "scan", "--pretend", "/music/A")
+        assert plugin._server._section.update_calls == []
+
+    def test_pretend_full_scans_nothing(self):
+        plugin = self.setup_plex()
+        self.run_command("plex", "scan", "--pretend", "--full")
+        assert plugin._server._section.update_calls == []
 
     def test_path_outside_library_errors(self):
         self.setup_plex()
