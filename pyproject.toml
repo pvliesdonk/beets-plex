@@ -28,6 +28,9 @@ packages = ["beetsplug"]
 [tool.ruff]
 line-length = 88
 target-version = "py310"
+# Ruff also formats Python code blocks inside Markdown; keep it away from
+# the design docs, whose snippets are prose, not maintained source.
+extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
