@@ -9,6 +9,8 @@ Tag conventions:
 Unrated is 0.0 or an absent field; writing an unrated value removes the tag.
 """
 
+import mediafile
+
 
 def rating_from_popm(raw):
     """POPM byte (0-255) to canonical 0-10 float; 0/None means unrated."""
@@ -44,3 +46,40 @@ def rating_to_vorbis(value):
     range, which reads back as the legacy star scale.
     """
     return str(max(10, min(100, int(round(float(value) * 10)))))
+
+
+class VorbisRatingStorageStyle(mediafile.StorageStyle):
+    """RATING Vorbis comment, 0-100; values <= 5 read as 0-5 stars."""
+
+    def __init__(self):
+        super().__init__("RATING")
+
+    def get(self, mutagen_file):
+        return rating_from_vorbis(self.fetch(mutagen_file))
+
+    def set(self, mutagen_file, value):
+        value = float(value or 0)
+        if value <= 0:
+            self.delete(mutagen_file)
+        else:
+            super().set(mutagen_file, rating_to_vorbis(value))
+
+
+class MP4RatingStorageStyle(mediafile.MP4StorageStyle):
+    """RATING freeform atom, 0-100 scale (no legacy star handling)."""
+
+    def __init__(self):
+        super().__init__("----:com.apple.iTunes:RATING")
+
+    def get(self, mutagen_file):
+        raw = self.fetch(mutagen_file)
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", "ignore")
+        return rating_from_vorbis(raw)
+
+    def set(self, mutagen_file, value):
+        value = float(value or 0)
+        if value <= 0:
+            self.delete(mutagen_file)
+        else:
+            super().set(mutagen_file, rating_to_vorbis(value))
