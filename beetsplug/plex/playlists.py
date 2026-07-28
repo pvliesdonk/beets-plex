@@ -37,8 +37,8 @@ def resolve_tracks(plugin, items, path_map, beets_dir, plex_dir, kind, name):
 
     An empty result means "delete the remote object", so it must only ever
     come from a query that genuinely matched nothing. If the query matched
-    items but none of them are in Plex — a wrong `plex_dir`, a library
-    mid-scan, a section that was re-created — deleting would destroy the
+    items but none of them are in Plex (a wrong `plex_dir`, a library
+    mid-scan, a section that was re-created), deleting would destroy the
     user's playlists and collections on a misconfiguration.
     """
     tracks = []

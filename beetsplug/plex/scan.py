@@ -7,8 +7,8 @@ def flush(plugin):
     """Run the queued partial scans; never raise.
 
     Called from `cli_exit`, which beets does not guard, so everything that
-    can fail — including reading config, which raises on a malformed
-    `auto_scan` value — stays inside a try.
+    can fail stays inside a try, including reading config, which raises on
+    a malformed `auto_scan` value.
     """
     dirs = sorted(plugin._scan_dirs)
     plugin._scan_dirs.clear()
