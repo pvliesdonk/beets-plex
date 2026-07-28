@@ -59,7 +59,8 @@ either direction. Both plugins declare `rating` as float; identical
 declarations do not conflict in beets.
 
 Packaging: hatchling, implicit `beetsplug` namespace package (PEP 420, no
-`__init__.py` in `beetsplug/`), dependencies `beets>=2.4` and `plexapi`.
+`__init__.py` in `beetsplug/`), dependencies `beets>=2.12` (the test suite
+uses `beets.test.helper.PluginTestHelper`, present from 2.12) and `plexapi`.
 No entry points; beets discovers plugins by module name. During development
 the repo's `beetsplug/` dir is added to `pluginpath`.
 
@@ -129,8 +130,9 @@ plex:
   port: 32400
   token: REDACTED            # marked redacted for `beet config` output
   library_name: 'Muziek Archief'
-  secure: no
-  ignore_cert_errors: no
+  secure: no                 # https; certificates are always verified
+                             # (plexupdate's ignore_cert_errors is
+                             # deliberately not supported)
 
   beets_dir: /mnt/music      # default: beets' `directory`
   plex_dir: /mnt/music       # path prefix as the Plex server sees it;
@@ -167,10 +169,14 @@ a type conflict.
 | `plex_updated` | DATE | when this item last synced |
 | `rating_updated` | DATE | when beets' rating last changed (see below) |
 
-`rating_updated` maintenance: a `database_change` listener stamps the current
-time when a stored item's dirty fields include `rating`, unless the change was
-made by the sync itself (internal guard flag). This makes true newest-wins
-conflict resolution possible.
+`rating_updated` maintenance: a `write` event listener stamps the current
+time when the item being written has `rating` among its dirty fields, unless
+the change was made by the sync itself (internal guard flag). The `write`
+event is used because it fires before the store while the dirty set is still
+populated; `database_change` fires after the dirty set is cleared and cannot
+identify which field changed. Limitation: a rating change with tag writing
+disabled (`beet modify -W`) is not stamped and falls back to the `conflict:`
+policy on a both-sides conflict.
 
 ### Matching
 
@@ -220,9 +226,9 @@ Contract edges:
 - A failed `rate()` call leaves base unchanged, so the next run retries; the
   sync is idempotent and resumable at item granularity.
 - Rating cleared on either side propagates as a clear, not as "no change".
-- The internal-change guard prevents the `database_change` listener from
-  stamping `rating_updated` during pulls (which would turn every pull into a
-  future conflict) and from re-entering itself.
+- The internal-change guard prevents the `write` listener from stamping
+  `rating_updated` during pulls (which would turn every pull into a future
+  conflict) and from re-entering itself.
 - Float comparison is exact; both sides store plain floats and ratingtag's
   one-decimal read rounding keeps tag-derived values stable.
 
@@ -297,7 +303,7 @@ smoke test gated behind an environment variable.
   `create_mediafile_fixture`, covering every contract edge listed above.
 - plex sync: table-driven tests over all merge cells including clears and
   both-changed with and without `rating_updated`; guard/reentrancy test for
-  the `database_change` listener.
+  the `write`-event stamping listener.
 - matching: prefix translation, stale-ratingkey re-resolution, multi-location
   tracks, out-of-library items.
 - playlists/collections: diffing, empty-query deletion, smart/foreign
