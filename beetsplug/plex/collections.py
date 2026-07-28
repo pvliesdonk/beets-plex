@@ -4,7 +4,7 @@ from beets import ui
 from beets.library import Item, parse_query_string
 
 from . import match
-from .playlists import select
+from .playlists import resolve_tracks, select
 
 
 def configured(plugin):
@@ -28,17 +28,15 @@ def run(plugin, lib, opts, args):
 
     for name, query_string in select(configured(plugin), args, kind="collection"):
         query, _ = parse_query_string(query_string, Item)
-        tracks = []
-        for item in lib.items(query):
-            track = match.resolve(item, path_map, beets_dir, plex_dir)
-            if track is None:
-                plugin._log.warning(
-                    "plex: {0} not in Plex, skipped for collection {1}",
-                    item,
-                    name,
-                )
-                continue
-            tracks.append(track)
+        tracks = resolve_tracks(
+            plugin,
+            lib.items(query),
+            path_map,
+            beets_dir,
+            plex_dir,
+            "collection",
+            name,
+        )
         _apply(plugin, server, music, name, tracks, pretend)
 
 

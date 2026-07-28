@@ -9,7 +9,6 @@ Tag conventions:
 Unrated is 0.0 or an absent field; writing an unrated value removes the tag.
 """
 
-import contextlib
 from typing import ClassVar
 
 import mediafile
@@ -156,8 +155,18 @@ class RatingTagPlugin(BeetsPlugin):
             out_type=float,
         )
         # mediafile registrations are class-level and survive plugin reloads
-        # within one process, so the first one wins and this second call is
-        # discarded (it only happens when a process loads the plugin twice,
-        # as the test suite does; each `beet` run is a fresh process).
-        with contextlib.suppress(ValueError):
+        # within one process, so loading this plugin twice (as the test suite
+        # does) hits an already-registered field. That case is fine and the
+        # first registration wins. A field registered by someone else is not
+        # fine: `rating` would then read and write through their tag mapping,
+        # silently ignoring popm_email and the 0-100 scale.
+        registered = mediafile.MediaFile.__dict__.get("rating")
+        if registered is None:
             self.add_media_field("rating", field)
+        elif not isinstance(registered, mediafile.MediaField) or not any(
+            isinstance(s, PopmRatingStorageStyle) for s in registered._styles
+        ):
+            self._log.warning(
+                "another plugin already registered a 'rating' media field; "
+                "ratingtag will not control how ratings are stored in files"
+            )

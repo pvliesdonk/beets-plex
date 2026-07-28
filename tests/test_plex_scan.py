@@ -29,6 +29,21 @@ class TestAutoScan(ScanBase):
         plugin_registry.send("item_removed", item=item)
         assert plugin._scan_dirs == {"/plex/A"}
 
+    def test_album_import_collects_directories(self):
+        # beets dispatches album_imported (not item_imported) for album
+        # imports, which is the dominant import workflow.
+        plugin = self.setup_plex()
+        items = [
+            self.add_item(path=b"/music/Album/01.mp3", album="A"),
+            self.add_item(path=b"/music/Album/02.mp3", album="A"),
+        ]
+        album = self.lib.add_album(items)
+        plugin._scan_dirs.clear()
+
+        plugin_registry.send("album_imported", lib=self.lib, album=album)
+
+        assert plugin._scan_dirs == {"/plex/Album"}
+
     def test_move_collects_both_directories(self):
         plugin = self.setup_plex()
         item = self.add_item(path=b"/music/B/b.mp3")

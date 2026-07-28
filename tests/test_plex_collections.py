@@ -1,3 +1,5 @@
+import pytest
+from beets import ui
 from beets.test.helper import PluginTestHelper
 
 from tests.fakeplex import (
@@ -109,10 +111,52 @@ class TestCollections(CollectionBase):
 
         assert self.section(plugin).collections() == []
 
-    def test_unknown_name_error_says_collection_not_playlist(self):
-        import pytest
-        from beets import ui
+    def test_pretend_does_not_delete_on_empty_query(self):
+        plugin = self.setup_plex([], [{"name": "Top2000", "query": "title:none"}])
+        section = self.section(plugin)
+        existing = FakeCollection(section, "Top2000", [FakeTrack(9, ["/x"])])
+        section._collections.append(existing)
 
+        self.run_command("plex", "collections", "--pretend")
+
+        assert section.collections() == [existing]
+
+    def test_pretend_does_not_diff_an_existing_collection(self):
+        keep = FakeTrack(1, ["/plex/A/a.mp3"])
+        add = FakeTrack(2, ["/plex/B/b.mp3"])
+        plugin = self.setup_plex([keep, add], [{"name": "Top2000", "query": ""}])
+        section = self.section(plugin)
+        existing = FakeCollection(section, "Top2000", [keep])
+        section._collections.append(existing)
+        self.add_item(path=b"/music/A/a.mp3", title="t")
+        self.add_item(path=b"/music/B/b.mp3", title="t")
+
+        self.run_command("plex", "collections", "--pretend")
+
+        assert existing.added == []
+        assert existing.removed == []
+
+    def test_total_match_failure_does_not_delete_the_collection(self):
+        # A misconfigured plex_dir makes every item unresolvable; that must
+        # not look like "the query matched nothing" and delete the object.
+        plugin = self.setup_plex([], [{"name": "Top2000", "query": ""}])
+        section = self.section(plugin)
+        existing = FakeCollection(section, "Top2000", [FakeTrack(9, ["/x"])])
+        section._collections.append(existing)
+        self.add_item(path=b"/music/A/a.mp3", title="t")
+
+        with pytest.raises(ui.UserError):
+            self.run_command("plex", "collections")
+
+        assert section.collections() == [existing]
+
+    def test_entry_without_a_name_is_rejected(self):
+        self.setup_plex([], [{"query": "title:t"}])
+
+        with pytest.raises(ui.UserError):
+            self.run_command("plex", "collections")
+
+    def test_unknown_name_error_says_collection_not_playlist(self):
         self.setup_plex([], [{"name": "Top2000", "query": ""}])
 
         with pytest.raises(ui.UserError) as excinfo:

@@ -94,12 +94,37 @@ class TestStatus(IOMixin, PluginTestHelper):
         config["plex"]["plex_dir"] = "/plex"
         plugin = plex_plugin()
         plugin._server = FakeServer(
-            FakeMusicSection(tracks=[FakeTrack(1, ["/plex/A/a.mp3"])])
+            FakeMusicSection(
+                tracks=[
+                    FakeTrack(1, ["/plex/A/a.mp3"]),
+                    FakeTrack(2, ["/plex/A/b.mp3"]),
+                ]
+            )
         )
         self.add_item(path=b"/music/A/a.mp3", title="hit")
+        self.add_item(path=b"/music/A/b.mp3", title="hit2")
         self.add_item(path=b"/music/B/missing.mp3", title="miss")
 
         output = self.run_with_output("plex", "status")
 
-        assert "1 matched" in output
-        assert "1 unmatched" in output
+        # Asymmetric counts asserted as a whole line, so swapping the two
+        # counters in the implementation cannot pass.
+        assert "items: 2 matched, 1 unmatched" in output
+
+    def test_status_respects_a_query(self):
+        from beets import config
+
+        from tests.fakeplex import FakeMusicSection, FakeServer, FakeTrack
+
+        config["plex"]["beets_dir"] = "/music"
+        config["plex"]["plex_dir"] = "/plex"
+        plugin = plex_plugin()
+        plugin._server = FakeServer(
+            FakeMusicSection(tracks=[FakeTrack(1, ["/plex/A/a.mp3"])])
+        )
+        self.add_item(path=b"/music/A/a.mp3", title="keepme")
+        self.add_item(path=b"/music/B/missing.mp3", title="zzz")
+
+        output = self.run_with_output("plex", "status", "title:keepme")
+
+        assert "items: 1 matched, 0 unmatched" in output

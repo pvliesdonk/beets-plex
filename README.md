@@ -123,9 +123,12 @@ against Plex's `lastRatedAt`. If no beets timestamp is available, the
 `conflict:` setting decides (default: Plex wins).
 
 `rating_updated` is recorded when beets writes a changed rating to a file, so
-`beet modify rating=8 <query>` is stamped normally. Ratings changed with tag
-writing suppressed (`beet modify -W`) are not stamped and fall back to the
-`conflict:` policy.
+`beet modify rating=8 <query>` is stamped whenever tag writing is on. It is
+not stamped when writing is suppressed — with `beet modify -W`, or for every
+command if your config sets `import.write: no` — and such a change falls back
+to the `conflict:` policy instead of winning on recency. `beet plex sync`
+warns when it resolves conflicts that way, so this is visible rather than
+silent.
 
 Play statistics (`plex_viewcount`, `plex_skipcount`, `plex_lastviewedat`) are
 pulled from Plex only; the Plex API does not allow writing them.

@@ -1,10 +1,16 @@
+import shutil
 from datetime import datetime
+from pathlib import Path
 
+import pytest
 from beets.test.helper import PluginTestHelper
+from plexapi.exceptions import BadRequest
 
 from beetsplug.plex import sync
 from tests.fakeplex import FakeMusicSection, FakeServer, FakeTrack
 from tests.test_plex_plugin import plex_plugin
+
+RSRC = Path(__file__).parent / "rsrc"
 
 
 class _Opts:
@@ -18,10 +24,16 @@ class _Opts:
 class SyncBase(PluginTestHelper):
     plugin = "plex"
 
+    @pytest.fixture(autouse=True)
+    def _music_dir(self, tmp_path):
+        """Give items real files: a pull writes tags before storing."""
+        self.music_dir = tmp_path / "music"
+        self.music_dir.mkdir()
+
     def setup_plex(self, tracks):
         from beets import config
 
-        config["plex"]["beets_dir"] = "/music"
+        config["plex"]["beets_dir"] = str(self.music_dir)
         config["plex"]["plex_dir"] = "/plex"
         config["plex"]["library_name"] = "Music"
         plugin = plex_plugin()
@@ -29,7 +41,10 @@ class SyncBase(PluginTestHelper):
         return plugin
 
     def add_track_item(self, relpath, **values):
-        return self.add_item(path=f"/music/{relpath}".encode(), **values)
+        dst = self.music_dir / relpath
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(RSRC / "full.mp3", dst)
+        return self.add_item(path=str(dst).encode(), **values)
 
 
 class TestSyncCommand(SyncBase):
@@ -52,10 +67,84 @@ class TestSyncCommand(SyncBase):
         assert item["rating"] == 9.0
         assert item["plex_userrating"] == 9.0
         assert item["plex_ratingkey"] == 7
+        assert item["plex_guid"] == "plex://track/7"
         assert item["plex_viewcount"] == 4
         assert item["plex_skipcount"] == 1
+        # Each timestamp must come from its own source field, not the other.
+        assert item["plex_lastratedat"] == datetime(2026, 1, 2).timestamp()
+        assert item["plex_lastviewedat"] == datetime(2026, 1, 3).timestamp()
         assert item["plex_updated"] > 0
         assert track.rate_calls == []
+
+    def test_pull_does_not_advance_base_when_the_tag_write_fails(self):
+        track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=9.0)
+        plugin = self.setup_plex([track])
+        item = self.add_track_item("A/a.mp3")
+        # An unwritable file: the rating cannot reach the tag, so the sync
+        # base must stay put or the next run would consider it done.
+        Path(item.path.decode()).unlink()
+
+        counts = sync.run(plugin, self.lib, _Opts(), [])
+
+        assert counts["failed"] == 1
+        assert counts["pulled"] == 0
+        item.load()
+        assert not item.get("plex_userrating")
+
+    def test_push_flag_skips_pulls(self):
+        track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=9.0)
+        self.setup_plex([track])
+        item = self.add_track_item("A/a.mp3")
+
+        self.run_command("plex", "sync", "--push")
+
+        item.load()
+        # A pull must not happen, so neither the rating nor the base moves.
+        assert not item.get("rating")
+        assert not item.get("plex_userrating")
+
+    def test_restricted_direction_is_counted_as_deferred(self):
+        track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=None)
+        plugin = self.setup_plex([track])
+        self.add_track_item("A/a.mp3", rating=8.0)
+
+        opts = _Opts()
+        opts.pull = True
+        counts = sync.run(plugin, self.lib, opts, [])
+
+        assert counts["deferred"] == 1
+        assert counts["pushed"] == 0
+
+    def test_pretend_does_not_write_mirrors_on_the_unchanged_branch(self):
+        # Nothing to do, but --pretend must still not touch the database.
+        track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=8.0)
+        self.setup_plex([track])
+        item = self.add_track_item("A/a.mp3", rating=8.0, plex_userrating=8.0)
+
+        self.run_command("plex", "sync", "--pretend")
+
+        item.load()
+        assert not item.get("plex_updated")
+        assert not item.get("plex_ratingkey")
+
+    def test_pull_stamp_guard_is_active_at_write_time(self):
+        # Pins the suspend_stamp guard itself rather than statement order:
+        # if the guard were removed, a pulled rating would stamp
+        # rating_updated and win the next conflict against Plex.
+        from beets import plugins as plugin_registry
+
+        track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=9.0)
+        plugin = self.setup_plex([track])
+        self.add_track_item("A/a.mp3")
+
+        seen = []
+        plugin_registry.BeetsPlugin.listeners.setdefault("write", []).append(
+            lambda **kw: seen.append(plugin._suspend_rating_stamp)
+        )
+
+        self.run_command("plex", "sync")
+
+        assert seen == [True]
 
     def test_push_rates_track(self):
         track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=None)
@@ -112,7 +201,7 @@ class TestSyncCommand(SyncBase):
         track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=None)
 
         def broken_rate(value):
-            raise RuntimeError("boom")
+            raise BadRequest("boom")
 
         track.rate = broken_rate
         self.setup_plex([track])
@@ -128,7 +217,7 @@ class TestSyncCommand(SyncBase):
         track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=None)
 
         def broken_rate(value):
-            raise RuntimeError("boom")
+            raise BadRequest("boom")
 
         track.rate = broken_rate
         plugin = self.setup_plex([track])

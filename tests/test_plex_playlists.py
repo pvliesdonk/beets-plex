@@ -116,6 +116,24 @@ class TestPlaylists(PlaylistBase):
         with pytest.raises(ui.UserError):
             self.run_command("plex", "playlists", "nope")
 
+    def test_total_match_failure_does_not_delete_the_playlist(self):
+        # Every item unresolvable (e.g. a wrong plex_dir) must not be
+        # mistaken for an empty query and delete the playlist.
+        plugin = self.setup_plex([], [{"name": "mix", "query": ""}])
+        existing = plugin._server.createPlaylist("mix", items=[FakeTrack(9, ["/x"])])
+        self.add_item(path=b"/music/A/a.mp3", title="t")
+
+        with pytest.raises(ui.UserError):
+            self.run_command("plex", "playlists")
+
+        assert plugin._server.playlists() == [existing]
+
+    def test_entry_without_a_name_is_rejected(self):
+        self.setup_plex([], [{"query": "title:t"}])
+
+        with pytest.raises(ui.UserError):
+            self.run_command("plex", "playlists")
+
     def test_pretend_changes_nothing(self):
         a = FakeTrack(1, ["/plex/A/a.mp3"])
         plugin = self.setup_plex([a], [{"name": "mix", "query": ""}])

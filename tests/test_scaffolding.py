@@ -14,6 +14,8 @@ def test_fixtures_are_valid_audio():
 def test_beets_and_plexapi_importable():
     import beets
     import plexapi
+    from packaging.version import Version
 
-    assert beets.__version__ >= "2.12"
+    # Version(), not a string compare: "2.9" >= "2.12" is True as strings.
+    assert Version(beets.__version__) >= Version("2.12")
     assert plexapi.VERSION
