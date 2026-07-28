@@ -49,13 +49,17 @@ def rating_from_vorbis(raw, legacy=True):
     return round(num / 10.0, 1)
 
 
-def rating_to_vorbis(value):
+def rating_to_vorbis(value, legacy=True):
     """Canonical 0-10 float to a 0-100 integer string.
 
-    Clamped to a minimum of "10" so written values never land in the 1-5
-    range, which reads back as the legacy star scale.
+    With `legacy` (the Vorbis default), the result is clamped to a minimum
+    of "10" so a written value never lands in the 1-5 range that the reader
+    would interpret as star ratings. MP4 has no such ambiguity, so it passes
+    `legacy=False` and keeps small ratings intact; clamping there would turn
+    every rating below 1.0 into 1.0 and break the round trip.
     """
-    return str(max(10, min(100, int(round(float(value) * 10)))))
+    floor = 10 if legacy else 1
+    return str(max(floor, min(100, int(round(float(value) * 10)))))
 
 
 class VorbisRatingStorageStyle(mediafile.StorageStyle):
@@ -137,7 +141,7 @@ class MP4RatingStorageStyle(mediafile.MP4StorageStyle):
         if value <= 0:
             self.delete(mutagen_file)
         else:
-            super().set(mutagen_file, rating_to_vorbis(value))
+            super().set(mutagen_file, rating_to_vorbis(value, legacy=False))
 
 
 class RatingTagPlugin(BeetsPlugin):

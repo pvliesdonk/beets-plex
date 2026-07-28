@@ -50,6 +50,14 @@ def test_vorbis_zero_negative_and_junk_read_as_unrated():
     assert rating_from_vorbis(None) is None
 
 
+@pytest.mark.parametrize("value", [n / 10.0 for n in range(1, 101)])
+def test_mp4_roundtrip_is_exact_for_every_representable_rating(value):
+    # The legacy-avoidance floor belongs to Vorbis only; on MP4 it would
+    # promote every rating below 1.0 to 1.0 and break the round trip.
+    written = rating_to_vorbis(value, legacy=False)
+    assert rating_from_vorbis(written, legacy=False) == value
+
+
 def test_mp4_scale_has_no_legacy_star_handling():
     # The MP4 atom is 0-100 only; a small value there is a low rating,
     # not a star count (unlike the Vorbis RATING comment).
