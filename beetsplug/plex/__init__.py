@@ -1,5 +1,6 @@
 """Synchronize the beets library with a Plex music library."""
 
+import time
 from contextlib import contextmanager
 from typing import ClassVar
 
@@ -45,6 +46,21 @@ class PlexPlugin(BeetsPlugin):
         self._server = None
         self._suspend_rating_stamp = False
         self._scan_dirs = set()
+        self.register_listener("write", self.on_write)
+
+    # -- rating change tracking ----------------------------------------
+
+    def on_write(self, item, path, tags):
+        """Stamp rating_updated while the rating change is still dirty.
+
+        Fires on the `write` event, which is dispatched before the store,
+        so the dirty set still identifies what changed. Suppressed while
+        the sync itself is applying a pull.
+        """
+        if self._suspend_rating_stamp:
+            return
+        if "rating" in item._dirty:
+            item.rating_updated = time.time()
 
     # -- connection ----------------------------------------------------
 
