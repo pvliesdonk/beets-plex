@@ -90,3 +90,32 @@ def test_both_changed_newest_wins_plex():
 def test_both_changed_without_timestamp_uses_conflict_policy(conflict, action, value):
     d = decide(6.0, 9.0, 4.0, None, datetime.now(), conflict)
     assert (d.action, d.value) == (action, value)
+    assert d.by_policy
+
+
+@pytest.mark.parametrize(
+    "conflict,action,value",
+    [("plex", PULL, 4.0), ("beets", PUSH, 9.0)],
+)
+def test_both_changed_without_plex_timestamp_uses_conflict_policy(
+    conflict, action, value
+):
+    # Plex drops lastRatedAt when a rating is cleared, so this side can be
+    # the missing one. Without the guard this raises AttributeError and
+    # aborts the whole sync run.
+    d = decide(6.0, 9.0, 4.0, datetime.now().timestamp(), None, conflict)
+    assert (d.action, d.value) == (action, value)
+    assert d.by_policy
+
+
+def test_recency_decision_is_not_flagged_as_policy():
+    now = datetime.now()
+    d = decide(
+        6.0,
+        9.0,
+        4.0,
+        rating_updated=now.timestamp(),
+        plex_lastratedat=now - timedelta(hours=1),
+        conflict="plex",
+    )
+    assert not d.by_policy

@@ -1,6 +1,7 @@
 import shutil
 from pathlib import Path
 
+import mutagen
 import pytest
 from beets.library import Item
 from beets.test.helper import PluginTestHelper
@@ -47,6 +48,22 @@ class TestRatingTagPlugin(PluginTestHelper):
         item.store()
         results = self.lib.items("rating:7..9")
         assert [i.title for i in results] == ["x"]
+
+    def test_configured_popm_email_reaches_the_file(self, tmp_path):
+        # Pins the config plumbing end to end: players key POPM frames by
+        # email, so a wrong one makes every track look unrated to them.
+        from beets import config
+
+        config["ratingtag"]["popm_email"] = "me@example.com"
+        self.unload_plugins()
+        self.load_plugins("ratingtag")
+
+        item, dst = self._item_with_file("mp3", tmp_path)
+        item["rating"] = 6.0
+        item.write()
+
+        frames = mutagen.File(dst).tags.getall("POPM")
+        assert [f.email for f in frames] == ["me@example.com"]
 
     def test_format_without_rating_style_writes_safely(self, tmp_path):
         # ASF/WMA has no rating storage style; write() must succeed and

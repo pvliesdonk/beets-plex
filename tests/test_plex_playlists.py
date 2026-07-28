@@ -1,6 +1,7 @@
 import pytest
 from beets import ui
 from beets.test.helper import PluginTestHelper
+from plexapi.exceptions import BadRequest
 
 from tests.fakeplex import (
     FakeMusicSection,
@@ -62,8 +63,21 @@ class TestPlaylists(PlaylistBase):
 
         assert plugin._server.playlists()[0] is existing
 
-    def test_empty_query_result_deletes_playlist(self):
+    def test_empty_query_leaves_the_playlist_alone_by_default(self):
+        # A query matching nothing is usually a typo, not an instruction to
+        # delete, so the default must be conservative.
         plugin = self.setup_plex([], [{"name": "mix", "query": "title:none"}])
+        existing = plugin._server.createPlaylist("mix", items=[FakeTrack(9, ["/x"])])
+
+        self.run_command("plex", "playlists")
+
+        assert plugin._server.playlists() == [existing]
+
+    def test_empty_query_result_deletes_playlist_when_pruning(self):
+        from beets import config
+
+        plugin = self.setup_plex([], [{"name": "mix", "query": "title:none"}])
+        config["plex"]["prune"] = True
         plugin._server.createPlaylist("mix", items=[FakeTrack(9, ["/x"])])
 
         self.run_command("plex", "playlists")
@@ -116,6 +130,59 @@ class TestPlaylists(PlaylistBase):
         with pytest.raises(ui.UserError):
             self.run_command("plex", "playlists", "nope")
 
+    def test_failed_create_leaves_the_previous_playlist_intact(self):
+        # Pins create-before-delete: the end state alone is identical under
+        # either ordering, so only a failing create distinguishes them.
+        a = FakeTrack(1, ["/plex/A/a.mp3"])
+        plugin = self.setup_plex([a], [{"name": "mix", "query": ""}])
+        existing = plugin._server.createPlaylist("mix", items=[FakeTrack(9, ["/x"])])
+        self.add_item(path=b"/music/A/a.mp3", title="t")
+
+        def broken_create(title, items=None, **kwargs):
+            raise BadRequest("server busy")
+
+        plugin._server.createPlaylist = broken_create
+
+        with pytest.raises(ui.UserError):
+            self.run_command("plex", "playlists")
+
+        assert plugin._server.playlists() == [existing]
+
+    def test_reordered_playlist_is_rebuilt(self):
+        # Playlist order carries the query's sort, so the same tracks in a
+        # different order are a real difference, not "unchanged".
+        a = FakeTrack(1, ["/plex/A/a.mp3"])
+        b = FakeTrack(2, ["/plex/B/b.mp3"])
+        plugin = self.setup_plex([a, b], [{"name": "mix", "query": "title:t artist+"}])
+        self.add_item(path=b"/music/A/a.mp3", title="t", artist="aa")
+        self.add_item(path=b"/music/B/b.mp3", title="t", artist="zz")
+        plugin._server.createPlaylist("mix", items=[b, a])  # reversed
+
+        self.run_command("plex", "playlists")
+
+        assert [t.ratingKey for t in plugin._server.playlists()[0].items()] == [1, 2]
+
+    def test_one_failing_entry_does_not_cancel_the_others(self):
+        a = FakeTrack(1, ["/plex/A/a.mp3"])
+        plugin = self.setup_plex(
+            [a],
+            [{"name": "bad", "query": ""}, {"name": "good", "query": ""}],
+        )
+        self.add_item(path=b"/music/A/a.mp3", title="t")
+        real_create = plugin._server.createPlaylist
+
+        def flaky(title, items=None, **kwargs):
+            if title == "bad":
+                raise BadRequest("nope")
+            return real_create(title, items=items, **kwargs)
+
+        plugin._server.createPlaylist = flaky
+
+        with pytest.raises(ui.UserError):
+            self.run_command("plex", "playlists")
+
+        assert [p.title for p in plugin._server.playlists()] == ["good"]
+
     def test_duplicate_titles_are_collapsed_to_one(self):
         # An interrupted earlier run can leave two playlists with the same
         # title; every stale one must go, not just the first.
@@ -131,8 +198,11 @@ class TestPlaylists(PlaylistBase):
         assert len(playlists) == 1
         assert [t.ratingKey for t in playlists[0].items()] == [1]
 
-    def test_empty_query_deletes_every_duplicate(self):
+    def test_empty_query_deletes_every_duplicate_when_pruning(self):
+        from beets import config
+
         plugin = self.setup_plex([], [{"name": "mix", "query": "title:none"}])
+        config["plex"]["prune"] = True
         plugin._server.createPlaylist("mix", items=[FakeTrack(9, ["/x"])])
         plugin._server.createPlaylist("mix", items=[FakeTrack(8, ["/y"])])
 

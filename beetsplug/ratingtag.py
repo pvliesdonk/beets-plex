@@ -88,11 +88,23 @@ class VorbisRatingStorageStyle(mediafile.StorageStyle):
 
 
 class PopmRatingStorageStyle(mediafile.MP3StorageStyle):
-    """Rating in a POPM frame, linear 0-255, matched by email."""
+    """Rating in a POPM frame, linear 0-255, matched by email.
 
-    def __init__(self, email):
+    `email` may be a string or a zero-argument callable. The plugin passes
+    a callable so the value is read from config at use time: mediafile
+    registrations are class-level and survive plugin reloads, so a style
+    that captured the email at construction would keep the first one ever
+    registered in the process and silently ignore a changed setting.
+    """
+
+    def __init__(self, email=""):
         super().__init__("POPM")
-        self.email = email or ""
+        self._email = email
+
+    @property
+    def email(self):
+        value = self._email() if callable(self._email) else self._email
+        return value or ""
 
     def _frame(self, mutagen_file):
         if mutagen_file.tags is None:
@@ -161,7 +173,7 @@ class RatingTagPlugin(BeetsPlugin):
         super().__init__()
         self.config.add({"popm_email": ""})
         field = mediafile.MediaField(
-            PopmRatingStorageStyle(self.config["popm_email"].as_str()),
+            PopmRatingStorageStyle(lambda: self.config["popm_email"].as_str()),
             VorbisRatingStorageStyle(),
             MP4RatingStorageStyle(),
             out_type=float,

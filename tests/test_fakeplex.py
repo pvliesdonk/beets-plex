@@ -4,12 +4,14 @@ from plexapi.exceptions import NotFound
 from tests.fakeplex import FakeMusicSection, FakeServer, FakeTrack
 
 
-def test_rate_records_and_bumps_lastratedat():
-    track = FakeTrack(1, ["/music/a.mp3"])
+def test_rate_records_without_mutating_local_state():
+    # Matches plexapi: rate() PUTs and returns without reloading, so an
+    # already-fetched object keeps its pre-push values.
+    track = FakeTrack(1, ["/music/a.mp3"], userRating=2.0)
     track.rate(8.0)
-    assert track.userRating == 8.0
     assert track.rate_calls == [8.0]
-    assert track.lastRatedAt is not None
+    assert track.userRating == 2.0
+    assert track.lastRatedAt is None
 
 
 def test_unknown_section_raises_notfound():

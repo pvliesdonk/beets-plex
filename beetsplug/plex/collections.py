@@ -2,20 +2,16 @@
 
 from beets import ui
 from beets.library import Item, parse_query_string
+from plexapi.exceptions import PlexApiException
+from requests.exceptions import RequestException
 
 from . import match
-from .playlists import resolve_tracks, select
+from .playlists import read_entries, resolve_tracks, select
 
 
 def configured(plugin):
     """Read [(name, query)] from the plex.collections config list."""
-    entries = []
-    for node in plugin.config["collections"].get(list):
-        name = node.get("name")
-        if not name:
-            raise ui.UserError("plex: collection entry without a name")
-        entries.append((str(name), str(node.get("query") or "")))
-    return entries
+    return read_entries(plugin, "collections", "collection")
 
 
 def run(plugin, lib, opts, args):
@@ -25,32 +21,50 @@ def run(plugin, lib, opts, args):
     beets_dir, plex_dir = plugin.dirs()
     path_map = match.build_path_map(music)
     pretend = bool(getattr(opts, "pretend", False))
+    prune = plugin.config["prune"].get(bool)
 
+    failed = 0
     for name, query_string in select(configured(plugin), args, kind="collection"):
-        query, _ = parse_query_string(query_string, Item)
-        tracks = resolve_tracks(
-            plugin,
-            lib.items(query),
-            path_map,
-            beets_dir,
-            plex_dir,
-            "collection",
-            name,
-        )
-        _apply(plugin, server, music, name, tracks, pretend)
+        # One entry's failure must not cancel the entries behind it.
+        try:
+            query, _ = parse_query_string(query_string, Item)
+            tracks = resolve_tracks(
+                plugin,
+                lib.items(query),
+                path_map,
+                beets_dir,
+                plex_dir,
+                "collection",
+                name,
+            )
+            _apply(plugin, server, music, name, tracks, pretend, prune)
+        except (PlexApiException, RequestException) as exc:
+            failed += 1
+            plugin._log.warning("plex: collection {0} failed: {1}", name, exc)
+    if failed:
+        raise ui.UserError(f"plex: {failed} collection(s) failed; see the log")
 
 
-def _apply(plugin, server, music, name, tracks, pretend):
-    existing = next((c for c in music.collections() if c.title == name), None)
-    if existing is not None:
-        if getattr(existing, "smart", False):
+def _apply(plugin, server, music, name, tracks, pretend, prune=False):
+    same_name = [c for c in music.collections() if c.title == name]
+    for collection in same_name:
+        if getattr(collection, "smart", False):
             plugin._log.warning("plex: {0} is a smart collection, skipped", name)
             return
-        if existing.subtype != "track":
+        if collection.subtype != "track":
             plugin._log.warning(
-                "plex: {0} is a {1} collection, skipped", name, existing.subtype
+                "plex: {0} is a {1} collection, skipped", name, collection.subtype
             )
             return
+    existing = same_name[0] if same_name else None
+    # Duplicate titles are possible in Plex; the extras would otherwise be
+    # invisible to every later run. Same handling as playlists.
+    for stale in same_name[1:]:
+        if pretend:
+            ui.print_(f"plex: would delete a duplicate collection {name}")
+        else:
+            plugin._log.warning("plex: deleting a duplicate collection {0}", name)
+            stale.delete()
 
     desired = {t.ratingKey: t for t in tracks}
 
@@ -68,13 +82,20 @@ def _apply(plugin, server, music, name, tracks, pretend):
         return
 
     if not tracks:
+        if not prune:
+            # A query matching nothing is far more often a typo than an
+            # instruction to delete; see the playlist equivalent.
+            plugin._log.warning(
+                "plex: collection {0} left alone: the query matched nothing "
+                "(set plex.prune to delete it instead)",
+                name,
+            )
+            return
         if pretend:
             ui.print_(f"plex: would delete collection {name}")
             return
         existing.delete()
-        plugin._log.warning(
-            "plex: collection {0} removed (query matched nothing)", name
-        )
+        plugin._log.warning("plex: collection {0} pruned (query matched nothing)", name)
         return
 
     current = {t.ratingKey: t for t in existing.items()}

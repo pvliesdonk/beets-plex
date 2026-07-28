@@ -2,19 +2,35 @@
 
 from beets import ui
 from beets.library import Item, parse_query_string
+from plexapi.exceptions import PlexApiException
+from requests.exceptions import RequestException
 
 from . import match
 
 
-def configured(plugin):
-    """Read [(name, query)] from the plex.playlists config list."""
+def read_entries(plugin, section, kind):
+    """Read [(name, query)] from a plex.<section> config list.
+
+    A missing `query` key is rejected rather than defaulting to the empty
+    query: the empty query matches the whole library, so a typo in the key
+    would quietly push every track in the library. An explicit empty string
+    still means "everything", which is occasionally what you want.
+    """
     entries = []
-    for node in plugin.config["playlists"].get(list):
+    for node in plugin.config[section].get(list):
         name = node.get("name")
         if not name:
-            raise ui.UserError("plex: playlist entry without a name")
-        entries.append((str(name), str(node.get("query") or "")))
+            raise ui.UserError(f"plex: {kind} entry without a name")
+        query = node.get("query")
+        if query is None:
+            raise ui.UserError(f"plex: {kind} {str(name)!r} has no query")
+        entries.append((str(name), str(query)))
     return entries
+
+
+def configured(plugin):
+    """Read [(name, query)] from the plex.playlists config list."""
+    return read_entries(plugin, "playlists", "playlist")
 
 
 def select(entries, names, kind="playlist"):
@@ -68,22 +84,31 @@ def run(plugin, lib, opts, args):
     beets_dir, plex_dir = plugin.dirs()
     path_map = match.build_path_map(music)
     pretend = bool(getattr(opts, "pretend", False))
+    prune = plugin.config["prune"].get(bool)
 
+    failed = 0
     for name, query_string in select(configured(plugin), args):
-        query, sort = parse_query_string(query_string, Item)
-        tracks = resolve_tracks(
-            plugin,
-            lib.items(query, sort),
-            path_map,
-            beets_dir,
-            plex_dir,
-            "playlist",
-            name,
-        )
-        _apply(plugin, server, name, tracks, pretend)
+        # One entry's failure must not cancel the entries behind it.
+        try:
+            query, sort = parse_query_string(query_string, Item)
+            tracks = resolve_tracks(
+                plugin,
+                lib.items(query, sort),
+                path_map,
+                beets_dir,
+                plex_dir,
+                "playlist",
+                name,
+            )
+            _apply(plugin, server, name, tracks, pretend, prune)
+        except (PlexApiException, RequestException) as exc:
+            failed += 1
+            plugin._log.warning("plex: playlist {0} failed: {1}", name, exc)
+    if failed:
+        raise ui.UserError(f"plex: {failed} playlist(s) failed; see the log")
 
 
-def _apply(plugin, server, name, tracks, pretend):
+def _apply(plugin, server, name, tracks, pretend, prune=False):
     same_name = [p for p in server.playlists() if p.title == name]
     for playlist in same_name:
         if playlist.playlistType != "audio":
@@ -109,8 +134,22 @@ def _apply(plugin, server, name, tracks, pretend):
         plugin._log.info("plex: playlist {0} unchanged", name)
         return
 
+    if not tracks and same_name and not prune:
+        # A query that matches nothing is far more often a typo or a
+        # half-imported library than a real instruction to delete, so an
+        # empty result leaves the playlist alone unless prune is enabled.
+        plugin._log.warning(
+            "plex: playlist {0} left alone: the query matched nothing "
+            "(set plex.prune to delete it instead)",
+            name,
+        )
+        return
+
     if pretend:
-        ui.print_(f"plex: would rebuild playlist {name} ({len(tracks)} tracks)")
+        if tracks:
+            ui.print_(f"plex: would rebuild playlist {name} ({len(tracks)} tracks)")
+        elif same_name:
+            ui.print_(f"plex: would delete playlist {name}")
         return
     if tracks:
         # Create the replacement before removing the old ones: if the create
@@ -121,7 +160,7 @@ def _apply(plugin, server, name, tracks, pretend):
             "plex: playlist {0} rebuilt with {1} tracks", name, len(tracks)
         )
     elif same_name:
-        plugin._log.warning("plex: playlist {0} removed (query matched nothing)", name)
+        plugin._log.warning("plex: playlist {0} pruned (query matched nothing)", name)
     else:
         plugin._log.info("plex: playlist {0}: nothing to do", name)
     # Delete every pre-existing playlist of this title, not just the first:

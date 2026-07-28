@@ -1,7 +1,5 @@
 """In-memory stand-ins for the plexapi objects the plex plugin touches."""
 
-from datetime import datetime
-
 from plexapi.exceptions import NotFound
 
 
@@ -30,9 +28,14 @@ class FakeTrack:
         self.rate_calls = []
 
     def rate(self, value):
+        """Record the call without mutating local state.
+
+        plexapi's RatingMixin.rate() PUTs to the server and returns without
+        reloading, so userRating and lastRatedAt on an already-fetched
+        object keep their pre-push values. Mirroring that here keeps the
+        double from being more helpful than the real API.
+        """
         self.rate_calls.append(value)
-        self.userRating = value
-        self.lastRatedAt = datetime.now()
 
 
 class FakePlaylist:

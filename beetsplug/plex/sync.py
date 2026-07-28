@@ -61,17 +61,33 @@ def decide(base, beets_value, plex_value, rating_updated, plex_lastratedat, conf
     return Decision(PULL, plex_val, by_policy)
 
 
-def _update_mirrors(item, track, agreed_value):
+def _update_mirrors(item, track, agreed_value, rated_at=None):
+    """Copy Plex-side state onto the item.
+
+    Every mirror is assigned unconditionally: a track unrated or with its
+    history cleared in Plex must lose the old value rather than keep a
+    stale one that queries would still find.
+
+    `rated_at` overrides the track's own timestamp after a push, because
+    plexapi's rate() does not reload the object, so `track.lastRatedAt`
+    still holds the value from before the rating we just sent.
+    """
+    now = time.time()
     item.plex_userrating = agreed_value
     item.plex_ratingkey = track.ratingKey
     item.plex_guid = track.guid or ""
     item.plex_viewcount = track.viewCount or 0
     item.plex_skipcount = track.skipCount or 0
-    if track.lastViewedAt:
-        item.plex_lastviewedat = track.lastViewedAt.timestamp()
-    if track.lastRatedAt:
-        item.plex_lastratedat = track.lastRatedAt.timestamp()
-    item.plex_updated = time.time()
+    item.plex_lastviewedat = (
+        track.lastViewedAt.timestamp() if track.lastViewedAt else 0.0
+    )
+    if rated_at is not None:
+        item.plex_lastratedat = rated_at
+    else:
+        item.plex_lastratedat = (
+            track.lastRatedAt.timestamp() if track.lastRatedAt else 0.0
+        )
+    item.plex_updated = now
 
 
 def run(plugin, lib, opts, args):
@@ -111,6 +127,7 @@ def run(plugin, lib, opts, args):
                 )
             continue
 
+        pushed_at = None
         decision = decide(
             item.get("plex_userrating"),
             item.get("rating"),
@@ -144,6 +161,9 @@ def run(plugin, lib, opts, args):
                 plugin._log.warning("plex: rating push failed for {0}: {1}", item, exc)
                 continue
             counts["pushed"] += 1
+            # Plex's own lastRatedAt for this rating; the track object was
+            # fetched before the push, so its copy is one rating behind.
+            pushed_at = time.time()
         elif decision.action == PULL:
             plugin._log.info(
                 "plex: pull rating {0} for {1}", decision.value or "clear", item
@@ -170,7 +190,7 @@ def run(plugin, lib, opts, args):
             if pretend:
                 continue
 
-        _update_mirrors(item, track, decision.value)
+        _update_mirrors(item, track, decision.value, pushed_at)
         with plugin.suspend_stamp():
             item.store()
 

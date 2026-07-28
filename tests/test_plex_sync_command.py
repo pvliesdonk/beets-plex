@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+from beets import ui
 from beets.test.helper import PluginTestHelper
 from plexapi.exceptions import BadRequest
 
@@ -115,6 +116,65 @@ class TestSyncCommand(SyncBase):
         assert counts["deferred"] == 1
         assert counts["pushed"] == 0
 
+    def test_agreeing_sides_still_record_the_sync_base(self):
+        # decide() returns NONE when both sides already agree, which is the
+        # ordinary first sync. The base must still be recorded, or a later
+        # clear in Plex reads as a beets-side change and gets pushed back.
+        track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=8.0, viewCount=3)
+        self.setup_plex([track])
+        item = self.add_track_item("A/a.mp3", rating=8.0)
+
+        self.run_command("plex", "sync")
+
+        item.load()
+        assert item["plex_userrating"] == 8.0
+        assert item["plex_ratingkey"] == 7
+        assert item["plex_viewcount"] == 3
+
+    def test_clearing_in_plex_after_agreement_pulls_rather_than_pushes(self):
+        track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=8.0)
+        self.setup_plex([track])
+        item = self.add_track_item("A/a.mp3", rating=8.0)
+        self.run_command("plex", "sync")
+
+        track.userRating = None  # user unrates it in Plex
+        self.run_command("plex", "sync")
+
+        item.load()
+        assert not item.get("rating")
+        assert track.rate_calls == []  # nothing pushed back
+
+    def test_stale_mirrors_are_cleared_when_plex_forgets(self):
+        track = FakeTrack(
+            7, ["/plex/A/a.mp3"], userRating=8.0, lastRatedAt=datetime(2020, 1, 1)
+        )
+        self.setup_plex([track])
+        item = self.add_track_item("A/a.mp3")
+        self.run_command("plex", "sync")
+        item.load()
+        assert item["plex_lastratedat"] > 0
+
+        track.userRating = None
+        track.lastRatedAt = None
+        self.run_command("plex", "sync")
+
+        item.load()
+        assert not item["plex_lastratedat"]
+
+    def test_push_stamps_a_fresh_rated_at(self):
+        # plexapi's rate() does not reload, so the track's own lastRatedAt
+        # is one rating behind and must not be mirrored after a push.
+        track = FakeTrack(
+            7, ["/plex/A/a.mp3"], userRating=None, lastRatedAt=datetime(2020, 1, 1)
+        )
+        self.setup_plex([track])
+        item = self.add_track_item("A/a.mp3", rating=8.0)
+
+        self.run_command("plex", "sync")
+
+        item.load()
+        assert item["plex_lastratedat"] > datetime(2024, 1, 1).timestamp()
+
     def test_pretend_does_not_write_mirrors_on_the_unchanged_branch(self):
         # Nothing to do, but --pretend must still not touch the database.
         track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=8.0)
@@ -207,7 +267,9 @@ class TestSyncCommand(SyncBase):
         self.setup_plex([track])
         item = self.add_track_item("A/a.mp3", rating=8.0)
 
-        self.run_command("plex", "sync")
+        # A failed item makes the command exit non-zero for automation.
+        with pytest.raises(ui.UserError):
+            self.run_command("plex", "sync")
 
         item.load()
         assert not item.get("plex_userrating")  # retried next run

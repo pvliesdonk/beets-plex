@@ -64,6 +64,8 @@ plex:
 
     auto_scan: yes             # partial scans after import/move/remove
     conflict: plex             # tie-break when both sides changed: plex | beets
+    prune: no                  # delete a playlist/collection whose query
+                               # now matches nothing (off: leave it alone)
 
     playlists:
         - name: Top 2000 all
@@ -79,7 +81,14 @@ ratingtag:
 
 Playlist and collection queries are ordinary beets queries, including sort
 terms (`top2000_score-` above sorts descending). Playlist order in Plex follows
-the query's sort order.
+the query's sort order. Every entry needs a `query` key; an empty string means
+"the whole library", but a missing key is rejected rather than silently
+meaning the same thing.
+
+If a query stops matching anything, the existing playlist or collection is
+left in place and a warning is logged, because that is far more often a typo
+or a half-imported library than a request to delete. Set `prune: yes` if you
+want an empty result to delete the remote object instead.
 
 ## Commands
 

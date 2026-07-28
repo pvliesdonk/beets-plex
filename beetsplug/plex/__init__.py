@@ -41,6 +41,7 @@ class PlexPlugin(BeetsPlugin):
                 "plex_dir": None,
                 "auto_scan": True,
                 "conflict": "plex",
+                "prune": False,
                 "playlists": [],
                 "collections": [],
             }
@@ -139,7 +140,12 @@ class PlexPlugin(BeetsPlugin):
     def cmd_sync(self, lib, opts, args):
         from . import sync
 
-        sync.run(self, lib, opts, args)
+        counts = sync.run(self, lib, opts, args)
+        if counts["failed"]:
+            # Non-zero exit so a scheduled run can tell it did not finish.
+            raise ui.UserError(
+                f"plex: {counts['failed']} item(s) failed to sync; see the log"
+            )
 
     def cmd_playlists(self, lib, opts, args):
         from . import playlists

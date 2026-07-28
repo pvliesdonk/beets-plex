@@ -75,7 +75,7 @@ class TestCollections(CollectionBase):
         assert existing.added == []
         assert existing.removed == []
 
-    def test_empty_query_deletes_collection(self):
+    def test_empty_query_leaves_the_collection_alone_by_default(self):
         plugin = self.setup_plex([], [{"name": "Top2000", "query": "title:none"}])
         section = self.section(plugin)
         existing = FakeCollection(section, "Top2000", [FakeTrack(9, ["/x"])])
@@ -83,7 +83,33 @@ class TestCollections(CollectionBase):
 
         self.run_command("plex", "collections")
 
+        assert section.collections() == [existing]
+
+    def test_empty_query_deletes_collection_when_pruning(self):
+        from beets import config
+
+        plugin = self.setup_plex([], [{"name": "Top2000", "query": "title:none"}])
+        config["plex"]["prune"] = True
+        section = self.section(plugin)
+        existing = FakeCollection(section, "Top2000", [FakeTrack(9, ["/x"])])
+        section._collections.append(existing)
+
+        self.run_command("plex", "collections")
+
         assert section.collections() == []
+
+    def test_duplicate_collection_titles_are_collapsed(self):
+        a = FakeTrack(1, ["/plex/A/a.mp3"])
+        plugin = self.setup_plex([a], [{"name": "Top2000", "query": ""}])
+        section = self.section(plugin)
+        keep = FakeCollection(section, "Top2000", [a])
+        dupe = FakeCollection(section, "Top2000", [FakeTrack(9, ["/x"])])
+        section._collections.extend([keep, dupe])
+        self.add_item(path=b"/music/A/a.mp3", title="t")
+
+        self.run_command("plex", "collections")
+
+        assert section.collections() == [keep]
 
     def test_smart_and_foreign_subtype_are_skipped(self):
         a = FakeTrack(1, ["/plex/A/a.mp3"])
