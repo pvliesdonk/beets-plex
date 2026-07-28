@@ -1062,7 +1062,9 @@ class TestPlexPluginSkeleton(PluginTestHelper):
         calls = []
         plugin = plex_plugin()
         monkeypatch.setattr(
-            plugin, "cmd_status", lambda lib, opts, args: calls.append(args),
+            plugin,
+            "cmd_status",
+            lambda lib, opts, args: calls.append(args),
             raising=False,
         )
         self.run_command("plex", "status", "extra")
@@ -1197,9 +1199,7 @@ class PlexPlugin(BeetsPlugin):
 
     def _dispatch(self, lib, opts, args):
         if not args:
-            raise ui.UserError(
-                "plex: subcommand required: " + ", ".join(SUBCOMMANDS)
-            )
+            raise ui.UserError("plex: subcommand required: " + ", ".join(SUBCOMMANDS))
         sub, rest = args[0], list(args[1:])
         handler = getattr(self, f"cmd_{sub}", None)
         if sub not in SUBCOMMANDS or handler is None:
@@ -1324,7 +1324,7 @@ def plex_path(item_path, beets_dir, plex_dir):
     base = beets_dir.rstrip(os.sep)
     if not path.startswith(base + os.sep):
         return None
-    return plex_dir.rstrip(os.sep) + path[len(base):]
+    return plex_dir.rstrip(os.sep) + path[len(base) :]
 
 
 def build_path_map(music, container_size=1000):
@@ -1442,7 +1442,9 @@ def test_both_changed_to_same_value_needs_no_network_action():
 def test_both_changed_newest_wins_beets():
     now = datetime.now()
     d = decide(
-        6.0, 9.0, 4.0,
+        6.0,
+        9.0,
+        4.0,
         rating_updated=now.timestamp(),
         plex_lastratedat=now - timedelta(hours=1),
         conflict="plex",
@@ -1453,7 +1455,9 @@ def test_both_changed_newest_wins_beets():
 def test_both_changed_newest_wins_plex():
     now = datetime.now()
     d = decide(
-        6.0, 9.0, 4.0,
+        6.0,
+        9.0,
+        4.0,
         rating_updated=(now - timedelta(hours=1)).timestamp(),
         plex_lastratedat=now,
         conflict="beets",
@@ -1465,9 +1469,7 @@ def test_both_changed_newest_wins_plex():
     "conflict,action,value",
     [("plex", PULL, 4.0), ("beets", PUSH, 9.0)],
 )
-def test_both_changed_without_timestamp_uses_conflict_policy(
-    conflict, action, value
-):
+def test_both_changed_without_timestamp_uses_conflict_policy(conflict, action, value):
     d = decide(6.0, 9.0, 4.0, None, datetime.now(), conflict)
     assert (d.action, d.value) == (action, value)
 ```
@@ -1727,9 +1729,7 @@ class TestSyncCommand(SyncBase):
     def test_push_clear_sends_none(self):
         track = FakeTrack(7, ["/plex/A/a.mp3"], userRating=6.0)
         self.setup_plex([track])
-        item = self.add_track_item(
-            "A/a.mp3", rating=0.0, plex_userrating=6.0
-        )
+        item = self.add_track_item("A/a.mp3", rating=0.0, plex_userrating=6.0)
 
         self.run_command("plex", "sync")
 
@@ -1869,9 +1869,7 @@ def run(plugin, lib, opts, args):
             try:
                 track.rate(decision.value if decision.value > 0 else None)
             except Exception as exc:
-                plugin._log.warning(
-                    "plex: rating push failed for {0}: {1}", item, exc
-                )
+                plugin._log.warning("plex: rating push failed for {0}: {1}", item, exc)
                 continue
         elif decision.action == PULL:
             counts["pulled"] += 1
@@ -1894,7 +1892,9 @@ def run(plugin, lib, opts, args):
 
     plugin._log.info(
         "plex: sync done: {0} pulled, {1} pushed, {2} unchanged, {3} unmatched",
-        counts["pulled"], counts["pushed"], counts["unchanged"],
+        counts["pulled"],
+        counts["pushed"],
+        counts["unchanged"],
         counts["unmatched"],
     )
 ```
@@ -1970,9 +1970,7 @@ class TestPlaylists(PlaylistBase):
     def test_creates_playlist_in_query_order(self):
         a = FakeTrack(1, ["/plex/A/a.mp3"])
         b = FakeTrack(2, ["/plex/B/b.mp3"])
-        plugin = self.setup_plex(
-            [a, b], [{"name": "mix", "query": "title:t artist+"}]
-        )
+        plugin = self.setup_plex([a, b], [{"name": "mix", "query": "title:t artist+"}])
         self.add_item(path=b"/music/B/b.mp3", title="t", artist="zz")
         self.add_item(path=b"/music/A/a.mp3", title="t", artist="aa")
 
@@ -2137,7 +2135,8 @@ def _apply(plugin, server, name, tracks, pretend):
         if playlist.playlistType != "audio":
             plugin._log.warning(
                 "plex: {0} exists as a {1} playlist, skipped",
-                name, playlist.playlistType,
+                name,
+                playlist.playlistType,
             )
             return
         if getattr(playlist, "smart", False):
@@ -2161,9 +2160,7 @@ def _apply(plugin, server, name, tracks, pretend):
             "plex: playlist {0} rebuilt with {1} tracks", name, len(tracks)
         )
     else:
-        plugin._log.warning(
-            "plex: playlist {0} removed (query matched nothing)", name
-        )
+        plugin._log.warning("plex: playlist {0} removed (query matched nothing)", name)
 ```
 
 Add to `PlexPlugin`:
@@ -2362,7 +2359,8 @@ def run(plugin, lib, opts, args):
             if track is None:
                 plugin._log.warning(
                     "plex: {0} not in Plex, skipped for collection {1}",
-                    item, name,
+                    item,
+                    name,
                 )
                 continue
             tracks.append(track)
@@ -2370,9 +2368,7 @@ def run(plugin, lib, opts, args):
 
 
 def _apply(plugin, server, music, name, tracks, pretend):
-    existing = next(
-        (c for c in music.collections() if c.title == name), None
-    )
+    existing = next((c for c in music.collections() if c.title == name), None)
     if existing is not None:
         if getattr(existing, "smart", False):
             plugin._log.warning("plex: {0} is a smart collection, skipped", name)
@@ -2416,8 +2412,7 @@ def _apply(plugin, server, music, name, tracks, pretend):
         return
     if pretend:
         ui.print_(
-            f"plex: would update collection {name}: "
-            f"+{len(to_add)} -{len(to_remove)}"
+            f"plex: would update collection {name}: +{len(to_add)} -{len(to_remove)}"
         )
         return
     if to_add:
@@ -2426,7 +2421,9 @@ def _apply(plugin, server, music, name, tracks, pretend):
         existing.removeItems(to_remove)
     plugin._log.info(
         "plex: collection {0} updated: +{1} -{2}",
-        name, len(to_add), len(to_remove),
+        name,
+        len(to_add),
+        len(to_remove),
     )
 ```
 
@@ -2613,49 +2610,51 @@ In `beetsplug/plex/__init__.py`, add at the top: `import os` and `from . import 
 Add the methods to `PlexPlugin`:
 
 ```python
-    # -- auto-scan -----------------------------------------------------
+# -- auto-scan -----------------------------------------------------
 
-    def _note_path(self, item_path):
-        beets_dir, plex_dir = self.dirs()
-        target = match.plex_path(item_path, beets_dir, plex_dir)
-        if target:
-            self._scan_dirs.add(os.path.dirname(target))
 
-    def _on_item_event(self, item, lib=None):
+def _note_path(self, item_path):
+    beets_dir, plex_dir = self.dirs()
+    target = match.plex_path(item_path, beets_dir, plex_dir)
+    if target:
+        self._scan_dirs.add(os.path.dirname(target))
+
+
+def _on_item_event(self, item, lib=None):
+    self._note_path(item.path)
+
+
+def _on_album_imported(self, lib, album):
+    for item in album.items():
         self._note_path(item.path)
 
-    def _on_album_imported(self, lib, album):
-        for item in album.items():
-            self._note_path(item.path)
 
-    def _on_item_moved(self, item, source, destination):
-        self._note_path(source)
-        self._note_path(destination)
+def _on_item_moved(self, item, source, destination):
+    self._note_path(source)
+    self._note_path(destination)
 
-    def _on_cli_exit(self, lib):
-        from . import scan
 
-        scan.flush(self)
+def _on_cli_exit(self, lib):
+    from . import scan
 
-    def cmd_scan(self, lib, opts, args):
-        music = self.music()
-        if getattr(opts, "full", False):
-            music.update()
-            ui.print_("plex: full section scan started")
-            return
-        if not args:
-            raise ui.UserError("plex scan: give beets-side PATHs or --full")
-        beets_dir, plex_dir = self.dirs()
-        for arg in args:
-            target = match.plex_path(
-                os.path.abspath(arg), beets_dir, plex_dir
-            )
-            if target is None:
-                raise ui.UserError(
-                    f"plex scan: {arg} is outside the beets directory"
-                )
-            music.update(path=target)
-            ui.print_(f"plex: scan started for {target}")
+    scan.flush(self)
+
+
+def cmd_scan(self, lib, opts, args):
+    music = self.music()
+    if getattr(opts, "full", False):
+        music.update()
+        ui.print_("plex: full section scan started")
+        return
+    if not args:
+        raise ui.UserError("plex scan: give beets-side PATHs or --full")
+    beets_dir, plex_dir = self.dirs()
+    for arg in args:
+        target = match.plex_path(os.path.abspath(arg), beets_dir, plex_dir)
+        if target is None:
+            raise ui.UserError(f"plex scan: {arg} is outside the beets directory")
+        music.update(path=target)
+        ui.print_(f"plex: scan started for {target}")
 ```
 
 Note on `test_flush_swallows_connection_errors`: with `_server = None`,

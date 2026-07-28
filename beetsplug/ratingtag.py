@@ -9,8 +9,13 @@ Tag conventions:
 Unrated is 0.0 or an absent field; writing an unrated value removes the tag.
 """
 
+import contextlib
+from typing import ClassVar
+
 import mediafile
 import mutagen.id3
+from beets.dbcore import types
+from beets.plugins import BeetsPlugin
 
 
 def rating_from_popm(raw):
@@ -129,3 +134,23 @@ class MP4RatingStorageStyle(mediafile.MP4StorageStyle):
             self.delete(mutagen_file)
         else:
             super().set(mutagen_file, rating_to_vorbis(value))
+
+
+class RatingTagPlugin(BeetsPlugin):
+    """Expose `rating` as a typed field that is written to file tags."""
+
+    item_types: ClassVar[dict] = {"rating": types.FLOAT}
+
+    def __init__(self):
+        super().__init__()
+        self.config.add({"popm_email": ""})
+        field = mediafile.MediaField(
+            PopmRatingStorageStyle(self.config["popm_email"].as_str()),
+            VorbisRatingStorageStyle(),
+            MP4RatingStorageStyle(),
+            out_type=float,
+        )
+        # mediafile keeps class-level registrations across plugin reloads
+        # in one process (e.g. the test suite), so re-registering is fine.
+        with contextlib.suppress(ValueError):
+            self.add_media_field("rating", field)
