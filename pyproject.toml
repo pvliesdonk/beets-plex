@@ -28,7 +28,6 @@ dependencies = [
     "beets>=2.12",
     "plexapi",
     "mediafile",
-    "mutagen",
 ]
 
 [project.urls]
@@ -43,12 +42,9 @@ test = ["pytest>=8", "ruff"]
 [tool.hatch.version]
 source = "vcs"
 
-# No plugin modules exist yet, so the wheel is deliberately metadata-only.
-# `bypass-selection` makes that explicit — without it hatchling would either
-# error or silently ship nothing. The real package target (`packages =
-# ["beetsplug"]`) lands with the first module. sdist uses hatchling's default.
+# The plugin modules live under the PEP 420 `beetsplug` namespace.
 [tool.hatch.build.targets.wheel]
-bypass-selection = true
+packages = ["beetsplug"]
 
 [tool.ruff]
 line-length = 88
