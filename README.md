@@ -15,8 +15,8 @@ file path — no fuzzy matching, no discovery. Two plugins ship in one package:
 Early. The design and delivery plan live on `main`:
 
 - [`docs/design.md`](docs/design.md) — high-level design.
-- [`docs/roadmap.md`](docs/roadmap.md) — the delivery roadmap. The project is at
-  the scaffolding stage; no plugin code yet.
+- [`docs/roadmap.md`](docs/roadmap.md) — the delivery roadmap. Built so far:
+  scaffolding and the `ratingtag` plugin; the `plex` plugin is next.
 
 ## Install
 
