@@ -1,11 +1,14 @@
 """The plex plugin: connect to a Plex Media Server, match beets items to tracks,
-report status, and pull play statistics.
+report status, pull play statistics, and sync ratings two-way.
 
-This module owns the shared ``plex:`` config, a lazily-created and reused server
-connection, the ``plex_ratingkey`` cache field, the play-statistics cache fields
-(``plex_viewcount``, ``plex_skipcount``, ``plex_lastviewedat``,
-``plex_lastratedat``, ``plex_updated``), and the ``beet plex status`` and
-``beet plex stats`` commands.
+This module owns the shared ``plex:`` config (including the ``rating_conflict``
+policy), a lazily-created and reused server connection, the ``plex_ratingkey``
+cache field, the play-statistics cache fields (``plex_viewcount``,
+``plex_skipcount``, ``plex_lastviewedat``, ``plex_lastratedat``,
+``plex_updated``), the rating-sync fields (``plex_rating_baseline``, the
+last-agreed rating, and ``plex_userrating``, a mirror of Plex's current
+rating), and the ``beet plex status``, ``beet plex stats``, and
+``beet plex sync`` commands.
 """
 
 from __future__ import annotations
@@ -180,7 +183,8 @@ class PlexPlugin(BeetsPlugin):
         beets rating is pushed to Plex, Plex's rating is adopted into beets, or
         (on a genuine conflict) the configured ``rating_conflict`` policy picks
         a winner. The beets ``rating`` DB field is the source of truth; ratingtag
-        persists the tag on store if enabled. ``pretend`` writes nothing.
+        persists the tag on store if enabled. With ``pretend``, each push/adopt
+        decision is printed per track and nothing is written.
         """
         policy = self.config["rating_conflict"].as_str()
         if policy not in ("plex", "beets", "skip"):
@@ -188,8 +192,9 @@ class PlexPlugin(BeetsPlugin):
         section = self.section()
         items = list(lib.items(query))
         matched, unmatched = self.match(items, section=section)
-        pushed = adopted = conflicts = 0
+        pushed = adopted = conflicts = unchanged = 0
         for item, track in matched:
+            b = rating.quantize(item.get("rating"))
             dec = rating.rating_merge(
                 item.get("rating"),
                 track.userRating,
@@ -198,16 +203,28 @@ class PlexPlugin(BeetsPlugin):
             )
             if dec.conflict:
                 conflicts += 1
+            marker = " (conflict)" if dec.conflict else ""
             if dec.action == rating.PUSH:
                 pushed += 1
-                if not pretend:
-                    track.rate(dec.value or None)
+                if pretend:
+                    ui.print_(
+                        f"would push {os.fsdecode(item.path)}: {b}→{dec.value}{marker}"
+                    )
+                    continue
+                track.rate(dec.value or None)
             elif dec.action == rating.ADOPT:
                 adopted += 1
-                if not pretend:
-                    item["rating"] = dec.value
-            if pretend:
-                continue
+                if pretend:
+                    ui.print_(
+                        f"would adopt {os.fsdecode(item.path)}: →{dec.value}{marker}"
+                    )
+                    continue
+                item["rating"] = dec.value
+            else:
+                if not dec.conflict:
+                    unchanged += 1
+                if pretend:
+                    continue
             # The mirror is Plex's value after the op (only a push changes Plex);
             # the baseline is the agreed value. Store once, only if something moved.
             plex_after = (
@@ -226,8 +243,9 @@ class PlexPlugin(BeetsPlugin):
                 item.store()
         head = "would " if pretend else ""
         ui.print_(
-            f"{len(matched)} matched; {head}push {pushed}, adopt {adopted}; "
-            f"{conflicts} conflict(s); {len(unmatched)} unmatched."
+            f"{len(matched)} matched; {head}push {pushed}, adopt {adopted}, "
+            f"unchanged {unchanged}; {conflicts} conflict(s); "
+            f"{len(unmatched)} unmatched."
         )
 
     # -- commands -----------------------------------------------------------

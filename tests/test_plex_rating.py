@@ -102,6 +102,7 @@ def test_sync_adopts_plex_rating_into_beets():
     assert item["rating"] == 4.0  # adopted into beets
     assert track.rated == []  # Plex not written
     assert item["plex_rating_baseline"] == 4.0
+    assert item["plex_userrating"] == 4.0  # mirror reflects Plex's value
 
 
 def test_sync_conflict_default_plex_wins_and_counts(capsys):
@@ -119,7 +120,10 @@ def test_sync_conflict_skip_writes_nothing(capsys):
     item = FakeItem("/mnt/music/a.mp3", rating=8.0, plex_rating_baseline=6.0)
     p.sync_ratings(FakeLib([item]), None, pretend=False)
     assert item["rating"] == 8.0  # untouched
+    assert item["plex_rating_baseline"] == 6.0  # untouched
     assert track.rated == []
+    assert item["plex_userrating"] == 4.0  # mirror still tracks Plex's value
+    assert item.stored == 1  # store happened for the mirror, not the rating
     assert "1 conflict" in capsys.readouterr().out
 
 
@@ -139,7 +143,28 @@ def test_sync_pretend_writes_nothing(capsys):
     assert item.stored == 0
     assert "rating" not in item._fields
     assert track.rated == []
-    assert "would" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "would adopt /mnt/music/a.mp3: →4.0" in out
+
+
+def test_sync_pretend_prints_push_decision(capsys):
+    track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=None)
+    p = _plugin(FakeSection("Muziek", [track]))
+    item = FakeItem("/mnt/music/a.mp3", rating=7.0)  # rated in beets, not Plex
+    p.sync_ratings(FakeLib([item]), None, pretend=True)
+    assert item.stored == 0
+    assert track.rated == []
+    out = capsys.readouterr().out
+    assert "would push /mnt/music/a.mp3: 7.0→7.0" in out
+
+
+def test_sync_pretend_marks_conflict(capsys):
+    track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=4.0)
+    p = _plugin(FakeSection("Muziek", [track]))
+    item = FakeItem("/mnt/music/a.mp3", rating=8.0, plex_rating_baseline=6.0)
+    p.sync_ratings(FakeLib([item]), None, pretend=True)
+    out = capsys.readouterr().out
+    assert "would adopt /mnt/music/a.mp3: →4.0 (conflict)" in out
 
 
 def test_sync_store_only_if_changed(capsys):
@@ -148,8 +173,10 @@ def test_sync_store_only_if_changed(capsys):
     item = FakeItem("/mnt/music/a.mp3")
     p.sync_ratings(FakeLib([item]), None, pretend=False)  # adopt 5.0, store
     assert item.stored == 1
+    capsys.readouterr()  # discard the first call's summary
     p.sync_ratings(FakeLib([item]), None, pretend=False)  # nothing changed
     assert item.stored == 1
+    assert "unchanged 1" in capsys.readouterr().out
 
 
 def test_run_dispatches_sync(capsys):

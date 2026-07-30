@@ -40,9 +40,10 @@ class FakeTrack:
         self.rated = []  # records rate() calls
 
     def rate(self, rating=None):
-        # plexapi: rate(None) resets the rating; 0-10 sets it.
+        # plexapi: rate(None) resets the rating; 0-10 sets it. Real plexapi's
+        # rate() only issues a PUT to the server and does NOT update
+        # userRating locally, so the fake must not either.
         self.rated.append(rating)
-        self.userRating = rating
 
 
 class FakeSection:
