@@ -29,6 +29,7 @@ class FakeTrack:
         lastViewedAt=None,
         lastRatedAt=None,
         userRating=None,
+        rate_raises=False,
     ):
         self.ratingKey = ratingKey
         self.media = [FakeMedia(files)]
@@ -38,11 +39,15 @@ class FakeTrack:
         self.lastRatedAt = lastRatedAt
         self.userRating = userRating
         self.rated = []  # records rate() calls
+        self._rate_raises = rate_raises  # simulate a Plex write failure
 
     def rate(self, rating=None):
         # plexapi: rate(None) resets the rating; 0-10 sets it. Real plexapi's
         # rate() only issues a PUT to the server and does NOT update
-        # userRating locally, so the fake must not either.
+        # userRating locally, so the fake must not either. A real rate() can
+        # raise (BadRequest / network error); rate_raises mirrors that.
+        if self._rate_raises:
+            raise RuntimeError("simulated Plex rate() failure")
         self.rated.append(rating)
 
 

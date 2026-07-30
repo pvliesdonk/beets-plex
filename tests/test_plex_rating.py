@@ -111,7 +111,25 @@ def test_sync_conflict_default_plex_wins_and_counts(capsys):
     item = FakeItem("/mnt/music/a.mp3", rating=8.0, plex_rating_baseline=6.0)
     p.sync_ratings(FakeLib([item]), None, pretend=False)
     assert item["rating"] == 4.0  # Plex wins
-    assert "1 conflict" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    # a real run names the conflicted track (not just the aggregate count)
+    assert "conflict /mnt/music/a.mp3: beets 8.0 vs plex 4.0 → 4.0" in out
+    assert "1 conflict" in out
+
+
+def test_sync_push_failure_is_logged_and_batch_continues(capsys):
+    # One track's Plex write fails; the batch must continue, count the failure,
+    # and leave that item's baseline untouched so the next sync retries it.
+    bad = FakeTrack(1, ["/srv/media/a.mp3"], userRating=None, rate_raises=True)
+    good = FakeTrack(2, ["/srv/media/b.mp3"], userRating=None)
+    p = _plugin(FakeSection("Muziek", [bad, good]))
+    item_bad = FakeItem("/mnt/music/a.mp3", rating=7.0)
+    item_good = FakeItem("/mnt/music/b.mp3", rating=5.0)
+    p.sync_ratings(FakeLib([item_bad, item_good]), None, pretend=False)
+    assert good.rated == [5.0]  # the good push still happened
+    assert "plex_rating_baseline" not in item_bad._fields  # untouched → retried
+    assert item_good["plex_rating_baseline"] == 5.0
+    assert "1 failed" in capsys.readouterr().out
 
 
 def test_sync_conflict_skip_writes_nothing(capsys):
@@ -164,7 +182,9 @@ def test_sync_pretend_marks_conflict(capsys):
     item = FakeItem("/mnt/music/a.mp3", rating=8.0, plex_rating_baseline=6.0)
     p.sync_ratings(FakeLib([item]), None, pretend=True)
     out = capsys.readouterr().out
-    assert "would adopt /mnt/music/a.mp3: →4.0 (conflict)" in out
+    assert "conflict /mnt/music/a.mp3: beets 8.0 vs plex 4.0 → 4.0" in out
+    assert "would adopt /mnt/music/a.mp3: →4.0" in out
+    assert track.rated == []  # pretend writes nothing
 
 
 def test_sync_store_only_if_changed(capsys):

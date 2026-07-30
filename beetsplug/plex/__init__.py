@@ -182,9 +182,12 @@ class PlexPlugin(BeetsPlugin):
         Per matched track, a value-based three-way merge decides whether the
         beets rating is pushed to Plex, Plex's rating is adopted into beets, or
         (on a genuine conflict) the configured ``rating_conflict`` policy picks
-        a winner. The beets ``rating`` DB field is the source of truth; ratingtag
-        persists the tag on store if enabled. With ``pretend``, each push/adopt
-        decision is printed per track and nothing is written.
+        a winner. Each conflict is named per track so the user sees which rating
+        was overwritten or left. The beets ``rating`` DB field is the source of
+        truth; ratingtag persists the tag on store if enabled. A Plex write that
+        fails is logged and counted, and its baseline is left untouched so the
+        next sync retries it, rather than aborting the batch. With ``pretend``,
+        each decision is printed per track and nothing is written.
         """
         policy = self.config["rating_conflict"].as_str()
         if policy not in ("plex", "beets", "skip"):
@@ -192,46 +195,57 @@ class PlexPlugin(BeetsPlugin):
         section = self.section()
         items = list(lib.items(query))
         matched, unmatched = self.match(items, section=section)
-        pushed = adopted = conflicts = unchanged = 0
+        pushed = adopted = conflicts = unchanged = failed = 0
         for item, track in matched:
+            path = os.fsdecode(item.path)
             b = rating.quantize(item.get("rating"))
+            p = rating.quantize(track.userRating)
             dec = rating.rating_merge(
                 item.get("rating"),
                 track.userRating,
                 item.get("plex_rating_baseline"),
                 policy,
             )
+            # A conflict discards the losing side's rating; name the track (in both
+            # modes) so the user sees what the policy resolved, or left, per track.
             if dec.conflict:
                 conflicts += 1
-            marker = " (conflict)" if dec.conflict else ""
-            if dec.action == rating.PUSH:
-                pushed += 1
-                if pretend:
-                    ui.print_(
-                        f"would push {os.fsdecode(item.path)}: {b}→{dec.value}{marker}"
-                    )
-                    continue
-                track.rate(dec.value or None)
-            elif dec.action == rating.ADOPT:
-                adopted += 1
-                if pretend:
-                    ui.print_(
-                        f"would adopt {os.fsdecode(item.path)}: →{dec.value}{marker}"
-                    )
-                    continue
-                item["rating"] = dec.value
-            else:
-                if not dec.conflict:
+                outcome = (
+                    "left unresolved" if dec.action == rating.NONE else f"→ {dec.value}"
+                )
+                ui.print_(f"conflict {path}: beets {b} vs plex {p} {outcome}")
+
+            if pretend:
+                if dec.action == rating.PUSH:
+                    pushed += 1
+                    ui.print_(f"would push {path}: {b}→{dec.value}")
+                elif dec.action == rating.ADOPT:
+                    adopted += 1
+                    ui.print_(f"would adopt {path}: →{dec.value}")
+                elif not dec.conflict:
                     unchanged += 1
-                if pretend:
+                continue
+
+            # Real run: apply the write, then advance the baseline and mirror.
+            if dec.action == rating.PUSH:
+                try:
+                    track.rate(dec.value or None)
+                except Exception as exc:
+                    # A transient Plex failure must not abort the batch or leave an
+                    # opaque traceback; skip this item (its baseline is untouched,
+                    # so the next sync retries it) and keep going.
+                    failed += 1
+                    self._log.warning("could not set Plex rating for {}: {}", path, exc)
                     continue
+                pushed += 1
+            elif dec.action == rating.ADOPT:
+                item["rating"] = dec.value
+                adopted += 1
+            elif not dec.conflict:
+                unchanged += 1
             # The mirror is Plex's value after the op (only a push changes Plex);
             # the baseline is the agreed value. Store once, only if something moved.
-            plex_after = (
-                dec.value
-                if dec.action == rating.PUSH
-                else rating.quantize(track.userRating)
-            )
+            plex_after = dec.value if dec.action == rating.PUSH else p
             dirty = dec.action == rating.ADOPT
             if rating.quantize(item.get("plex_rating_baseline")) != dec.baseline:
                 item["plex_rating_baseline"] = dec.baseline
@@ -242,9 +256,10 @@ class PlexPlugin(BeetsPlugin):
             if dirty:
                 item.store()
         head = "would " if pretend else ""
+        failtail = f", {failed} failed" if failed else ""
         ui.print_(
             f"{len(matched)} matched; {head}push {pushed}, adopt {adopted}, "
-            f"unchanged {unchanged}; {conflicts} conflict(s); "
+            f"unchanged {unchanged}; {conflicts} conflict(s){failtail}; "
             f"{len(unmatched)} unmatched."
         )
 
