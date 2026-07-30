@@ -1,8 +1,11 @@
 """The plex plugin: connect to a Plex Media Server, match beets items to tracks,
-and report status.
+report status, and pull play statistics.
 
 This module owns the shared ``plex:`` config, a lazily-created and reused server
-connection, the ``plex_ratingkey`` cache field, and ``beet plex status``.
+connection, the ``plex_ratingkey`` cache field, the play-statistics cache fields
+(``plex_viewcount``, ``plex_skipcount``, ``plex_lastviewedat``,
+``plex_lastratedat``, ``plex_updated``), and the ``beet plex status`` and
+``beet plex stats`` commands.
 """
 
 from __future__ import annotations
@@ -16,6 +19,12 @@ from beets.dbcore import types
 from beets.plugins import BeetsPlugin
 
 from . import matching, stats
+
+# Stat fields Plex may stop reporting (a wiped play history drops the
+# timestamps). track_stats omits an absent one, so pull_stats clears any
+# previously-stored value rather than leave a play time Plex no longer has.
+# Counts self-clear: Plex always reports them, as 0 when reset.
+_CLEARABLE_STAT_FIELDS = ("plex_lastviewedat", "plex_lastratedat")
 
 
 class PlexPlugin(BeetsPlugin):
@@ -120,9 +129,11 @@ class PlexPlugin(BeetsPlugin):
     def pull_stats(self, lib, query, pretend=False):
         """Pull Plex play statistics into the matched items' beets fields.
 
-        One-way, Plex-authoritative. Only items whose stats actually changed are
-        stored (and only then is ``plex_updated`` bumped); with ``pretend`` the
-        would-be changes are printed and nothing is written.
+        One-way and Plex-authoritative: each matched item's stat fields are set
+        to what Plex currently reports, and a timestamp Plex no longer reports
+        is cleared rather than left stale. Only items whose stats actually
+        changed are stored (and only then is ``plex_updated`` bumped); with
+        ``pretend`` the would-be changes are printed and nothing is written.
         """
         section = self.section()
         items = list(lib.items(query))
@@ -130,14 +141,22 @@ class PlexPlugin(BeetsPlugin):
         updated = 0
         for item, track in matched:
             fields = stats.track_stats(track)
-            if all(item.get(k) == v for k, v in fields.items()):
+            stale = [
+                k
+                for k in _CLEARABLE_STAT_FIELDS
+                if k not in fields and item.get(k) is not None
+            ]
+            if not stale and all(item.get(k) == v for k, v in fields.items()):
                 continue
             updated += 1
             if pretend:
-                ui.print_(f"would update {os.fsdecode(item.path)}: {fields}")
+                cleared = f" (clear {', '.join(stale)})" if stale else ""
+                ui.print_(f"would update {os.fsdecode(item.path)}: {fields}{cleared}")
                 continue
             for key, value in fields.items():
                 item[key] = value
+            for key in stale:
+                del item[key]
             item["plex_updated"] = time.time()
             item.store()
         verb = "would update" if pretend else "updated"

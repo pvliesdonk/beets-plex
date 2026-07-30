@@ -84,6 +84,9 @@ class FakeItem:
     def __setitem__(self, key, value):
         self._fields[key] = value
 
+    def __delitem__(self, key):
+        del self._fields[key]
+
     def get(self, key, default=None):
         return self._fields.get(key, default)
 

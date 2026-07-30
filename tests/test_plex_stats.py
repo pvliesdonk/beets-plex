@@ -105,6 +105,28 @@ def test_store_only_if_changed(capsys):
     assert "0 updated" in capsys.readouterr().out
 
 
+def test_pull_clears_timestamp_plex_no_longer_reports():
+    # A prior pull left a timestamp; Plex has since dropped it (history wiped).
+    # The mirror is Plex-authoritative, so the stale value must be cleared.
+    track = FakeTrack(1, ["/srv/media/a.mp3"], viewCount=0, lastViewedAt=None)
+    p = _plugin(FakeSection("Muziek", [track]))
+    item = FakeItem("/mnt/music/a.mp3", plex_lastviewedat=1234.5, plex_viewcount=5)
+    p.pull_stats(FakeLib([item]), None, pretend=False)
+    assert "plex_lastviewedat" not in item._fields  # cleared, not left stale
+    assert item["plex_viewcount"] == 0  # count self-cleared to Plex's 0
+    assert item.stored == 1
+
+
+def test_pretend_does_not_clear_timestamps(capsys):
+    track = FakeTrack(1, ["/srv/media/a.mp3"], viewCount=0, lastViewedAt=None)
+    p = _plugin(FakeSection("Muziek", [track]))
+    item = FakeItem("/mnt/music/a.mp3", plex_lastviewedat=1234.5)
+    p.pull_stats(FakeLib([item]), None, pretend=True)
+    assert item._fields["plex_lastviewedat"] == 1234.5  # untouched under pretend
+    assert item.stored == 0
+    assert "would update" in capsys.readouterr().out
+
+
 def test_run_dispatches_stats(capsys):
     track = FakeTrack(1, ["/srv/media/a.mp3"], viewCount=4)
     p = _plugin(FakeSection("Muziek", [track]))
