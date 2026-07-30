@@ -1,14 +1,16 @@
 """The plex plugin: connect to a Plex Media Server, match beets items to tracks,
-report status, pull play statistics, and sync ratings two-way.
+report status, pull play statistics, sync ratings two-way, and push
+query-defined playlists and collections.
 
 This module owns the shared ``plex:`` config (including the ``rating_conflict``
-policy), a lazily-created and reused server connection, the ``plex_ratingkey``
+policy and the ``playlists``/``collections`` entries with their ``prune_empty``
+guard), a lazily-created and reused server connection, the ``plex_ratingkey``
 cache field, the play-statistics cache fields (``plex_viewcount``,
 ``plex_skipcount``, ``plex_lastviewedat``, ``plex_lastratedat``,
 ``plex_updated``), the rating-sync fields (``plex_rating_baseline``, the
 last-agreed rating, and ``plex_userrating``, a mirror of Plex's current
-rating), and the ``beet plex status``, ``beet plex stats``, and
-``beet plex sync`` commands.
+rating), and the ``beet plex status``, ``beet plex stats``, ``beet plex sync``,
+``beet plex playlists``, and ``beet plex collections`` commands.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from beets import ui
 from beets.dbcore import types
 from beets.plugins import BeetsPlugin
 
-from . import matching, rating, stats
+from . import matching, pushing, rating, stats
 
 # Stat fields Plex may stop reporting (a wiped play history drops the
 # timestamps). track_stats omits an absent one, so pull_stats clears any
@@ -54,6 +56,9 @@ class PlexPlugin(BeetsPlugin):
                 "beets_dir": "",
                 "plex_dir": "",
                 "rating_conflict": "plex",
+                "playlists": [],
+                "collections": [],
+                "prune_empty": False,
             }
         )
         self.config["token"].redact = True
@@ -102,6 +107,26 @@ class PlexPlugin(BeetsPlugin):
         plex_dir = self.config["plex_dir"].as_str() or beets_dir
         return beets_dir, plex_dir
 
+    def _entries(self, kind, names):
+        """The configured ``(name, query)`` entries for ``kind`` (``"playlists"``
+        or ``"collections"``), filtered to ``names`` if any are given.
+
+        Raises ``ui.UserError`` if a configured entry is not a mapping or is
+        missing ``name``/``query`` — a raw ``KeyError``/``TypeError`` from a
+        typo'd config would otherwise surface as an unhandled traceback.
+        """
+        entries = []
+        for e in self.config[kind].get(list):
+            if not isinstance(e, dict) or "name" not in e or "query" not in e:
+                raise ui.UserError(
+                    f"malformed plex.{kind} entry (need 'name' and 'query'): {e!r}"
+                )
+            entries.append((e["name"], e["query"]))
+        if names:
+            wanted = set(names)
+            entries = [(n, q) for n, q in entries if n in wanted]
+        return entries
+
     # -- matching -----------------------------------------------------------
 
     def match(self, items, section=None):
@@ -129,6 +154,136 @@ class PlexPlugin(BeetsPlugin):
             if target is None:
                 self._log.warning("item outside beets_dir, not matched: {}", item_path)
         return matched, unmatched
+
+    # -- playlists --------------------------------------------------------
+
+    def _entry_tracks(self, lib, query, section):
+        """Matched Plex tracks for a config entry's query, in query order.
+        Unmatched items (not in Plex) are excluded and warned about."""
+        matched, unmatched = self.match(list(lib.items(query)), section=section)
+        if unmatched:
+            self._log.warning(
+                "{} item(s) for query {!r} are not in Plex; excluded",
+                len(unmatched),
+                query,
+            )
+        return [track for _item, track in matched]
+
+    def _push_playlist(self, name, tracks, pretend):
+        from plexapi.exceptions import NotFound
+
+        try:
+            existing = self.server().playlist(name)
+        except NotFound:
+            existing = None
+        if not tracks:  # the query matched nothing in Plex
+            if existing is None:
+                return "keep"
+            if self.config["prune_empty"].get(bool):
+                if not pretend:
+                    existing.delete()
+                return "prune"
+            ui.print_(
+                f"playlist {name!r} query matches nothing; left as-is "
+                "(set plex.prune_empty to delete)"
+            )
+            return "skip"
+        if existing is None:
+            if not pretend:
+                self.server().createPlaylist(name, items=tracks)
+            return "create"
+        current = existing.items()
+        if pushing.playlist_matches(current, tracks):
+            return "keep"
+        if not pretend:
+            # Remove-then-add: a failure between removeItems and addItems
+            # leaves the playlist transiently empty, but it self-heals on the
+            # next run. The collection path below adds before it removes and
+            # never wipes the collection in between.
+            existing.removeItems(current)
+            existing.addItems(tracks)
+        return "update"
+
+    def push_playlists(self, lib, names, pretend=False):
+        from plexapi.exceptions import PlexApiException
+        from requests.exceptions import RequestException
+
+        section = self.section()
+        entries = self._entries("playlists", names)
+        if names and not entries:
+            ui.print_(f"no playlists named: {', '.join(names)}")
+        failed = 0
+        for name, query in entries:
+            try:
+                tracks = self._entry_tracks(lib, query, section)
+                outcome = self._push_playlist(name, tracks, pretend)
+            except (PlexApiException, RequestException) as exc:
+                failed += 1
+                self._log.warning("playlist {!r} failed: {}", name, exc)
+                continue
+            head = "would " if pretend else ""
+            ui.print_(f"{head}{outcome} playlist {name!r} ({len(tracks)} track(s))")
+        failtail = f"; {failed} failed" if failed else ""
+        ui.print_(f"playlists done{failtail}.")
+
+    # -- collections --------------------------------------------------------
+
+    def _push_collection(self, section, name, tracks, pretend):
+        from plexapi.exceptions import NotFound
+
+        try:
+            existing = section.collection(name)
+        except NotFound:
+            existing = None
+        if not tracks:  # the query matched nothing in Plex
+            if existing is None:
+                return "keep"
+            if self.config["prune_empty"].get(bool):
+                if not pretend:
+                    existing.delete()
+                return "prune"
+            ui.print_(
+                f"collection {name!r} query matches nothing; left as-is "
+                "(set plex.prune_empty to delete)"
+            )
+            return "skip"
+        if existing is None:
+            if not pretend:
+                section.createCollection(name, items=tracks)
+            return "create"
+        to_add, to_remove = pushing.collection_diff(existing.items(), tracks)
+        if not to_add and not to_remove:
+            return "keep"
+        if not pretend:
+            if to_add:
+                existing.addItems(to_add)
+            if to_remove:
+                existing.removeItems(to_remove)
+        return "update"
+
+    def push_collections(self, lib, names, pretend=False):
+        from plexapi.exceptions import PlexApiException
+        from requests.exceptions import RequestException
+
+        section = self.section()
+        entries = self._entries("collections", names)
+        if names and not entries:
+            ui.print_(f"no collections named: {', '.join(names)}")
+        failed = 0
+        for name, query in entries:
+            try:
+                # Resolve INSIDE the try: match() sweeps Plex, so a per-entry
+                # network error there must be counted and skipped, not abort all.
+                tracks = self._entry_tracks(lib, query, section)
+                outcome = self._push_collection(section, name, tracks, pretend)
+            except (PlexApiException, RequestException) as exc:
+                failed += 1
+                self._log.warning("collection {!r} failed: {}", name, exc)
+                continue
+            head = "would " if pretend else ""
+            ui.print_(f"{head}{outcome} collection {name!r} ({len(tracks)} track(s))")
+        failtail = f"; {failed} failed" if failed else ""
+        ui.print_(f"collections done{failtail}.")
 
     # -- stats ----------------------------------------------------------------
 
@@ -295,6 +450,12 @@ class PlexPlugin(BeetsPlugin):
             self.pull_stats(lib, query, pretend=getattr(opts, "pretend", False))
         elif action == "sync":
             self.sync_ratings(lib, args[1:], pretend=getattr(opts, "pretend", False))
+        elif action == "playlists":
+            self.push_playlists(lib, args[1:], pretend=getattr(opts, "pretend", False))
+        elif action == "collections":
+            self.push_collections(
+                lib, args[1:], pretend=getattr(opts, "pretend", False)
+            )
         else:
             raise ui.UserError(f"unknown plex subcommand: {action!r}")
 
