@@ -1,14 +1,16 @@
 """The plex plugin: connect to a Plex Media Server, match beets items to tracks,
-report status, pull play statistics, and sync ratings two-way.
+report status, pull play statistics, sync ratings two-way, and push
+query-defined playlists and collections.
 
 This module owns the shared ``plex:`` config (including the ``rating_conflict``
-policy), a lazily-created and reused server connection, the ``plex_ratingkey``
+policy and the ``playlists``/``collections`` entries with their ``prune_empty``
+guard), a lazily-created and reused server connection, the ``plex_ratingkey``
 cache field, the play-statistics cache fields (``plex_viewcount``,
 ``plex_skipcount``, ``plex_lastviewedat``, ``plex_lastratedat``,
 ``plex_updated``), the rating-sync fields (``plex_rating_baseline``, the
 last-agreed rating, and ``plex_userrating``, a mirror of Plex's current
-rating), and the ``beet plex status``, ``beet plex stats``, and
-``beet plex sync`` commands.
+rating), and the ``beet plex status``, ``beet plex stats``, ``beet plex sync``,
+``beet plex playlists``, and ``beet plex collections`` commands.
 """
 
 from __future__ import annotations
