@@ -79,8 +79,8 @@ def test_pull_forwards_query_and_skips_unmatched():
     track = FakeTrack(1, ["/srv/media/a.mp3"], viewCount=1)
     p = _plugin(FakeSection("Muziek", [track]))
     lib = FakeLib([FakeItem("/mnt/music/a.mp3"), FakeItem("/mnt/music/gone.mp3")])
-    p.pull_stats(lib, "artist:x", pretend=False)
-    assert lib.last_query == "artist:x"  # query forwarded to beets
+    p.pull_stats(lib, ["artist:x"], pretend=False)
+    assert lib.last_query == ["artist:x"]  # query forwarded to beets
     assert lib._items[1].stored == 0  # unmatched item untouched
 
 

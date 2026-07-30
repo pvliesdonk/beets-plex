@@ -35,14 +35,17 @@ def test_plex_path(item_path, expected):
 def test_resolve_hit_and_miss():
     track = FakeTrack(ratingKey=1, files=["/srv/media/a.mp3"])
     path_map = matching.build_path_map([track])
-    assert matching.resolve("/mnt/music/a.mp3", path_map, BEETS_DIR, PLEX_DIR) is track
-    assert matching.resolve("/mnt/music/x.mp3", path_map, BEETS_DIR, PLEX_DIR) is None
+    hit = matching.plex_path("/mnt/music/a.mp3", BEETS_DIR, PLEX_DIR)
+    miss = matching.plex_path("/mnt/music/x.mp3", BEETS_DIR, PLEX_DIR)
+    assert path_map.get(hit) is track
+    assert path_map.get(miss) is None
 
 
 def test_multi_location_track_found_by_any_file():
     track = FakeTrack(1, ["/srv/media/a.mp3", "/srv/media/b.mp3"])
     path_map = matching.build_path_map([track])
-    assert matching.resolve("/mnt/music/b.mp3", path_map, BEETS_DIR, PLEX_DIR) is track
+    target = matching.plex_path("/mnt/music/b.mp3", BEETS_DIR, PLEX_DIR)
+    assert path_map.get(target) is track
 
 
 # -- server() ---------------------------------------------------------------
