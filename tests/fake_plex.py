@@ -101,10 +101,13 @@ class FakeSection:
         return list(self._tracks)
 
     def collection(self, title):
-        try:
-            return self._collections[title]
-        except KeyError:
-            raise NotFound(f"no collection {title!r}") from None
+        # plexapi's Section.collection matches title__iexact (case-insensitive);
+        # mirror it so the fake is no stricter than the real API.
+        norm = title.lower().strip()
+        for stored_title, coll in self._collections.items():
+            if stored_title.lower().strip() == norm:
+                return coll
+        raise NotFound(f"no collection {title!r}")
 
     def createCollection(self, title, items=None, **kwargs):
         if not items:
@@ -140,10 +143,13 @@ class FakeServer:
         self._playlists = {}
 
     def playlist(self, title):
-        try:
-            return self._playlists[title]
-        except KeyError:
-            raise NotFound(f"no playlist {title!r}") from None
+        # plexapi's Server.playlist matches title__iexact (case-insensitive);
+        # mirror it so the fake is no stricter than the real API.
+        norm = title.lower().strip()
+        for stored_title, pl in self._playlists.items():
+            if stored_title.lower().strip() == norm:
+                return pl
+        raise NotFound(f"no playlist {title!r}")
 
     def createPlaylist(self, title, section=None, items=None, **kwargs):
         if not items:

@@ -107,8 +107,19 @@ class PlexPlugin(BeetsPlugin):
 
     def _entries(self, kind, names):
         """The configured ``(name, query)`` entries for ``kind`` (``"playlists"``
-        or ``"collections"``), filtered to ``names`` if any are given."""
-        entries = [(e["name"], e["query"]) for e in self.config[kind].get(list)]
+        or ``"collections"``), filtered to ``names`` if any are given.
+
+        Raises ``ui.UserError`` if a configured entry is not a mapping or is
+        missing ``name``/``query`` — a raw ``KeyError``/``TypeError`` from a
+        typo'd config would otherwise surface as an unhandled traceback.
+        """
+        entries = []
+        for e in self.config[kind].get(list):
+            if not isinstance(e, dict) or "name" not in e or "query" not in e:
+                raise ui.UserError(
+                    f"malformed plex.{kind} entry (need 'name' and 'query'): {e!r}"
+                )
+            entries.append((e["name"], e["query"]))
         if names:
             wanted = set(names)
             entries = [(n, q) for n, q in entries if n in wanted]
@@ -179,10 +190,15 @@ class PlexPlugin(BeetsPlugin):
             if not pretend:
                 self.server().createPlaylist(name, items=tracks)
             return "create"
-        if pushing.playlist_matches(existing.items(), tracks):
+        current = existing.items()
+        if pushing.playlist_matches(current, tracks):
             return "keep"
         if not pretend:
-            existing.removeItems(existing.items())
+            # Remove-then-add: a failure between removeItems and addItems
+            # leaves the playlist transiently empty, but it self-heals on the
+            # next run. The collection path below adds before it removes and
+            # never wipes the collection in between.
+            existing.removeItems(current)
             existing.addItems(tracks)
         return "update"
 
@@ -191,8 +207,11 @@ class PlexPlugin(BeetsPlugin):
         from requests.exceptions import RequestException
 
         section = self.section()
+        entries = self._entries("playlists", names)
+        if names and not entries:
+            ui.print_(f"no playlists named: {', '.join(names)}")
         failed = 0
-        for name, query in self._entries("playlists", names):
+        for name, query in entries:
             try:
                 tracks = self._entry_tracks(lib, query, section)
                 outcome = self._push_playlist(name, tracks, pretend)
@@ -245,8 +264,11 @@ class PlexPlugin(BeetsPlugin):
         from requests.exceptions import RequestException
 
         section = self.section()
+        entries = self._entries("collections", names)
+        if names and not entries:
+            ui.print_(f"no collections named: {', '.join(names)}")
         failed = 0
-        for name, query in self._entries("collections", names):
+        for name, query in entries:
             try:
                 # Resolve INSIDE the try: match() sweeps Plex, so a per-entry
                 # network error there must be counted and skipped, not abort all.
