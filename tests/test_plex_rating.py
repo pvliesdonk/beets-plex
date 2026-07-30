@@ -132,6 +132,21 @@ def test_sync_push_failure_is_logged_and_batch_continues(capsys):
     assert "1 failed" in capsys.readouterr().out
 
 
+def test_sync_unexpected_error_propagates():
+    # Only Plex API / network errors are absorbed per track. A different error
+    # (a real bug) must NOT be miscounted as a transient failure — it propagates.
+    track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=None)
+
+    def boom(rating=None):
+        raise RuntimeError("a real bug, not a Plex error")
+
+    track.rate = boom
+    p = _plugin(FakeSection("Muziek", [track]))
+    item = FakeItem("/mnt/music/a.mp3", rating=7.0)
+    with pytest.raises(RuntimeError):
+        p.sync_ratings(FakeLib([item]), None, pretend=False)
+
+
 def test_sync_conflict_skip_writes_nothing(capsys):
     track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=4.0)
     p = _plugin(FakeSection("Muziek", [track]), policy="skip")
