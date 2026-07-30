@@ -45,10 +45,3 @@ def build_path_map(tracks) -> dict[str, object]:
                 if part.file:
                     path_map[_normalize(part.file)] = track
     return path_map
-
-
-def resolve(item_path: str, path_map: dict, beets_dir: str, plex_dir: str):
-    """The Plex track matching an item path, or ``None`` — either because the
-    item is outside the library root or because its path is not in Plex."""
-    target = plex_path(item_path, beets_dir, plex_dir)
-    return None if target is None else path_map.get(target)

@@ -20,9 +20,21 @@ class FakeMedia:
 
 
 class FakeTrack:
-    def __init__(self, ratingKey, files):
+    def __init__(
+        self,
+        ratingKey,
+        files,
+        viewCount=0,
+        skipCount=0,
+        lastViewedAt=None,
+        lastRatedAt=None,
+    ):
         self.ratingKey = ratingKey
         self.media = [FakeMedia(files)]
+        self.viewCount = viewCount
+        self.skipCount = skipCount
+        self.lastViewedAt = lastViewedAt
+        self.lastRatedAt = lastRatedAt
 
 
 class FakeSection:
@@ -38,8 +50,10 @@ class FakeSection:
 class FakeLibrary:
     def __init__(self, section):
         self._section = section
+        self.section_calls = 0
 
     def section(self, title):
+        self.section_calls += 1
         # plexapi's Library.section normalizes with title.lower().strip(); mirror
         # it so the fake is no stricter than the real API.
         if title.lower().strip() != self._section.title.lower().strip():
@@ -62,6 +76,7 @@ class FakeItem:
     def __init__(self, path, **fields):
         self.path = path.encode() if isinstance(path, str) else path
         self._fields = dict(fields)
+        self.stored = 0
 
     def __getitem__(self, key):
         return self._fields[key]
@@ -69,10 +84,21 @@ class FakeItem:
     def __setitem__(self, key, value):
         self._fields[key] = value
 
+    def __delitem__(self, key):
+        del self._fields[key]
+
+    def get(self, key, default=None):
+        return self._fields.get(key, default)
+
+    def store(self):
+        self.stored += 1
+
 
 class FakeLib:
     def __init__(self, items):
         self._items = list(items)
+        self.last_query = "unset"
 
-    def items(self):
+    def items(self, query=None):
+        self.last_query = query
         return list(self._items)

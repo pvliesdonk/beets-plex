@@ -35,14 +35,17 @@ def test_plex_path(item_path, expected):
 def test_resolve_hit_and_miss():
     track = FakeTrack(ratingKey=1, files=["/srv/media/a.mp3"])
     path_map = matching.build_path_map([track])
-    assert matching.resolve("/mnt/music/a.mp3", path_map, BEETS_DIR, PLEX_DIR) is track
-    assert matching.resolve("/mnt/music/x.mp3", path_map, BEETS_DIR, PLEX_DIR) is None
+    hit = matching.plex_path("/mnt/music/a.mp3", BEETS_DIR, PLEX_DIR)
+    miss = matching.plex_path("/mnt/music/x.mp3", BEETS_DIR, PLEX_DIR)
+    assert path_map.get(hit) is track
+    assert path_map.get(miss) is None
 
 
 def test_multi_location_track_found_by_any_file():
     track = FakeTrack(1, ["/srv/media/a.mp3", "/srv/media/b.mp3"])
     path_map = matching.build_path_map([track])
-    assert matching.resolve("/mnt/music/b.mp3", path_map, BEETS_DIR, PLEX_DIR) is track
+    target = matching.plex_path("/mnt/music/b.mp3", BEETS_DIR, PLEX_DIR)
+    assert path_map.get(target) is track
 
 
 # -- server() ---------------------------------------------------------------
@@ -131,6 +134,13 @@ def test_status_reports_counts(capsys):
     assert "1 of 2 items matched" in out and "1 unmatched" in out
 
 
+def test_status_resolves_section_once():
+    section = FakeSection("Muziek", [FakeTrack(1, ["/srv/media/a.mp3"])])
+    p = _plugin_with(section)
+    p.status(FakeLib([FakeItem("/mnt/music/a.mp3")]))
+    assert p._server.library.section_calls == 1
+
+
 def test_library_name_is_case_and_space_insensitive():
     # plexapi's Library.section normalizes the title; a case/spacing variant of
     # the configured library_name must still resolve, as it would against Plex.
@@ -142,7 +152,7 @@ def test_library_name_is_case_and_space_insensitive():
 
 
 def test_plugin_declares_ratingkey_field():
-    assert plex.PlexPlugin.item_types == {"plex_ratingkey": types.INTEGER}
+    assert plex.PlexPlugin.item_types["plex_ratingkey"] is types.INTEGER
 
 
 def test_run_dispatches_status_and_rejects_unknown(capsys):

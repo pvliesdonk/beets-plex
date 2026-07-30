@@ -1,24 +1,41 @@
 """The plex plugin: connect to a Plex Media Server, match beets items to tracks,
-and report status.
+report status, and pull play statistics.
 
 This module owns the shared ``plex:`` config, a lazily-created and reused server
-connection, the ``plex_ratingkey`` cache field, and ``beet plex status``.
+connection, the ``plex_ratingkey`` cache field, the play-statistics cache fields
+(``plex_viewcount``, ``plex_skipcount``, ``plex_lastviewedat``,
+``plex_lastratedat``, ``plex_updated``), and the ``beet plex status`` and
+``beet plex stats`` commands.
 """
 
 from __future__ import annotations
 
 import os
+import time
 
 import beets
 from beets import ui
 from beets.dbcore import types
 from beets.plugins import BeetsPlugin
 
-from . import matching
+from . import matching, stats
+
+# Stat fields Plex may stop reporting (a wiped play history drops the
+# timestamps). track_stats omits an absent one, so pull_stats clears any
+# previously-stored value rather than leave a play time Plex no longer has.
+# Counts self-clear: Plex always reports them, as 0 when reset.
+_CLEARABLE_STAT_FIELDS = ("plex_lastviewedat", "plex_lastratedat")
 
 
 class PlexPlugin(BeetsPlugin):
-    item_types = {"plex_ratingkey": types.INTEGER}
+    item_types = {
+        "plex_ratingkey": types.INTEGER,
+        "plex_viewcount": types.INTEGER,
+        "plex_skipcount": types.INTEGER,
+        "plex_lastviewedat": types.DateType(),
+        "plex_lastratedat": types.DateType(),
+        "plex_updated": types.DateType(),
+    }
 
     def __init__(self):
         super().__init__()
@@ -81,32 +98,87 @@ class PlexPlugin(BeetsPlugin):
 
     # -- matching -----------------------------------------------------------
 
-    def match(self, items):
+    def match(self, items, section=None):
         """Resolve ``items`` against one fresh sweep of the section.
 
         Returns ``(matched, unmatched)``, where ``matched`` is a list of
         ``(item, track)`` pairs. Matching is by path, so a stale
         ``plex_ratingkey`` never misdirects; an item outside the library root is
-        warned about and left unmatched.
+        warned about and left unmatched. Pass ``section`` to reuse an already
+        resolved section instead of resolving it again.
         """
         beets_dir, plex_dir = self.directories()
-        path_map = matching.build_path_map(self.section().searchTracks())
+        if section is None:
+            section = self.section()
+        path_map = matching.build_path_map(section.searchTracks())
         matched, unmatched = [], []
         for item in items:
             item_path = os.fsdecode(item.path)
-            track = matching.resolve(item_path, path_map, beets_dir, plex_dir)
+            target = matching.plex_path(item_path, beets_dir, plex_dir)
+            track = path_map.get(target) if target is not None else None
             if track is not None:
                 matched.append((item, track))
                 continue
             unmatched.append(item)
-            if matching.plex_path(item_path, beets_dir, plex_dir) is None:
+            if target is None:
                 self._log.warning("item outside beets_dir, not matched: {}", item_path)
         return matched, unmatched
+
+    # -- stats ----------------------------------------------------------------
+
+    def pull_stats(self, lib, query, pretend=False):
+        """Pull Plex play statistics into the matched items' beets fields.
+
+        One-way and Plex-authoritative: each matched item's stat fields are set
+        to what Plex currently reports, and a timestamp Plex no longer reports
+        is cleared rather than left stale. Only items whose stats actually
+        changed are stored (and only then is ``plex_updated`` bumped); with
+        ``pretend`` the would-be changes are printed and nothing is written.
+        """
+        section = self.section()
+        items = list(lib.items(query))
+        matched, unmatched = self.match(items, section=section)
+        updated = 0
+        for item, track in matched:
+            fields = stats.track_stats(track)
+            stale = [
+                k
+                for k in _CLEARABLE_STAT_FIELDS
+                if k not in fields and item.get(k) is not None
+            ]
+            if not stale and all(item.get(k) == v for k, v in fields.items()):
+                continue
+            updated += 1
+            if pretend:
+                cleared = f" (clear {', '.join(stale)})" if stale else ""
+                ui.print_(f"would update {os.fsdecode(item.path)}: {fields}{cleared}")
+                continue
+            for key, value in fields.items():
+                item[key] = value
+            for key in stale:
+                del item[key]
+            # Whole seconds, like the pulled timestamps: these DateType fields
+            # round-trip through SQLite TEXT, whose precision is build-dependent,
+            # so a sub-second value could differ after reload (harmless here as
+            # plex_updated is never compared, but consistent and query-safe).
+            item["plex_updated"] = int(time.time())
+            item.store()
+        verb = "would update" if pretend else "updated"
+        ui.print_(
+            f"{len(matched)} matched; {updated} {verb}; {len(unmatched)} unmatched."
+        )
 
     # -- commands -----------------------------------------------------------
 
     def commands(self):
         cmd = ui.Subcommand("plex", help="synchronize with a Plex Media Server")
+        cmd.parser.add_option(
+            "-p",
+            "--pretend",
+            action="store_true",
+            default=False,
+            help="show what would change; write nothing",
+        )
         cmd.func = self._run
         return [cmd]
 
@@ -114,6 +186,9 @@ class PlexPlugin(BeetsPlugin):
         action = args[0] if args else "status"
         if action == "status":
             self.status(lib)
+        elif action == "stats":
+            query = args[1:]
+            self.pull_stats(lib, query, pretend=getattr(opts, "pretend", False))
         else:
             raise ui.UserError(f"unknown plex subcommand: {action!r}")
 
@@ -122,7 +197,7 @@ class PlexPlugin(BeetsPlugin):
         nothing."""
         section = self.section()
         items = list(lib.items())
-        matched, unmatched = self.match(items)
+        matched, unmatched = self.match(items, section=section)
         ui.print_(
             f"Connected to Plex library {section.title!r} ({section.totalSize} tracks)."
         )
