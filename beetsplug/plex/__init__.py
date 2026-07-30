@@ -35,6 +35,8 @@ class PlexPlugin(BeetsPlugin):
         "plex_lastviewedat": types.DateType(),
         "plex_lastratedat": types.DateType(),
         "plex_updated": types.DateType(),
+        "plex_rating_baseline": types.FLOAT,
+        "plex_userrating": types.FLOAT,
     }
 
     def __init__(self):
@@ -48,6 +50,7 @@ class PlexPlugin(BeetsPlugin):
                 "secure": False,
                 "beets_dir": "",
                 "plex_dir": "",
+                "rating_conflict": "plex",
             }
         )
         self.config["token"].redact = True

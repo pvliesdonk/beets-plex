@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from beets.dbcore import types as _types
+
+from beetsplug import plex
 from beetsplug.plex import rating
 from beetsplug.plex.rating import ADOPT, NONE, PUSH
 
@@ -52,3 +55,12 @@ def test_first_sync_both_rated_differently_seeds_plex():
 def test_subdecimal_drift_is_not_a_change():
     # a baseline that round-tripped to 6.04 must not read as changed vs 6.0
     assert rating.rating_merge(6.04, 6.0, 6.0) == (NONE, 6.0, 6.0, False)
+
+
+def test_plugin_declares_rating_fields_and_config():
+    it = plex.PlexPlugin.item_types
+    assert it["plex_rating_baseline"] is _types.FLOAT
+    assert it["plex_userrating"] is _types.FLOAT
+    assert "rating" not in it  # ratingtag owns `rating`; declaring it here collides
+    p = plex.PlexPlugin()
+    assert p.config["rating_conflict"].as_str() == "plex"
