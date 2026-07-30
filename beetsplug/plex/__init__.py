@@ -157,7 +157,11 @@ class PlexPlugin(BeetsPlugin):
                 item[key] = value
             for key in stale:
                 del item[key]
-            item["plex_updated"] = time.time()
+            # Whole seconds, like the pulled timestamps: these DateType fields
+            # round-trip through SQLite TEXT, whose precision is build-dependent,
+            # so a sub-second value could differ after reload (harmless here as
+            # plex_updated is never compared, but consistent and query-safe).
+            item["plex_updated"] = int(time.time())
             item.store()
         verb = "would update" if pretend else "updated"
         ui.print_(

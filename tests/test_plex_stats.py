@@ -102,7 +102,7 @@ def test_pull_writes_stats_for_matched_items():
     p.pull_stats(FakeLib([item]), None, pretend=False)
     assert item["plex_viewcount"] == 3
     assert item["plex_lastviewedat"] == int(viewed.timestamp())
-    assert "plex_updated" in item._fields
+    assert item["plex_updated"] == int(item["plex_updated"])  # whole seconds too
     assert item.stored == 1
 
 
@@ -145,6 +145,17 @@ def test_pull_clears_timestamp_plex_no_longer_reports():
     p.pull_stats(FakeLib([item]), None, pretend=False)
     assert "plex_lastviewedat" not in item._fields  # cleared, not left stale
     assert item["plex_viewcount"] == 0  # count self-cleared to Plex's 0
+    assert item.stored == 1
+
+
+def test_pull_clears_lastratedat_when_plex_drops_it():
+    # Same clear path as plex_lastviewedat, exercised for plex_lastratedat so
+    # both _CLEARABLE_STAT_FIELDS entries are covered (roadmap regression cluster).
+    track = FakeTrack(1, ["/srv/media/a.mp3"], viewCount=1, lastRatedAt=None)
+    p = _plugin(FakeSection("Muziek", [track]))
+    item = FakeItem("/mnt/music/a.mp3", plex_lastratedat=9876.5)
+    p.pull_stats(FakeLib([item]), None, pretend=False)
+    assert "plex_lastratedat" not in item._fields  # cleared, not left stale
     assert item.stored == 1
 
 
