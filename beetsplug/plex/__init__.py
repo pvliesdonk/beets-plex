@@ -59,10 +59,25 @@ class PlexPlugin(BeetsPlugin):
                 "playlists": [],
                 "collections": [],
                 "prune_empty": False,
+                "auto_scan": False,
+                "scan_threshold": 100,
             }
         )
         self.config["token"].redact = True
         self._server = None
+        self._scan_dirs = set()
+        if self.config["auto_scan"].get(bool):
+            for event in ("item_imported", "item_removed"):
+                self.register_listener(event, self._scan_item)
+            self.register_listener("item_moved", self._scan_move)
+            for event in (
+                "item_copied",
+                "item_linked",
+                "item_hardlinked",
+                "item_reflinked",
+            ):
+                self.register_listener(event, self._scan_place)
+            self.register_listener("cli_exit", self._scan_cli_exit)
 
     # -- connection ---------------------------------------------------------
 
@@ -154,6 +169,25 @@ class PlexPlugin(BeetsPlugin):
             if target is None:
                 self._log.warning("item outside beets_dir, not matched: {}", item_path)
         return matched, unmatched
+
+    # -- auto-scan ----------------------------------------------------------
+
+    def _touch(self, path):
+        """Record the directory of a bytes file ``path`` as touched."""
+        self._scan_dirs.add(os.path.dirname(os.fsdecode(path)))
+
+    def _scan_item(self, item=None, **kwargs):
+        self._touch(item.path)  # item_imported / item_removed
+
+    def _scan_move(self, source=None, destination=None, **kwargs):
+        self._touch(source)  # the file left this directory
+        self._touch(destination)  # and arrived in this one
+
+    def _scan_place(self, destination=None, **kwargs):
+        self._touch(destination)  # item_copied / _linked / _hardlinked / _reflinked
+
+    def _scan_cli_exit(self, lib=None, **kwargs):
+        pass
 
     # -- playlists --------------------------------------------------------
 
