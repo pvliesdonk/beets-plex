@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timezone
 
 from beets.dbcore import types as _types
@@ -40,8 +41,8 @@ def test_track_stats_played_track_has_all_fields():
     assert result == {
         "plex_viewcount": 5,
         "plex_skipcount": 2,
-        "plex_lastviewedat": viewed.timestamp(),
-        "plex_lastratedat": rated.timestamp(),
+        "plex_lastviewedat": int(viewed.timestamp()),  # whole seconds
+        "plex_lastratedat": int(rated.timestamp()),
     }
 
 
@@ -50,6 +51,32 @@ def test_track_stats_never_played_omits_timestamps():
     assert result == {"plex_viewcount": 0, "plex_skipcount": 0}
     assert "plex_lastviewedat" not in result
     assert "plex_lastratedat" not in result
+
+
+def _beets_flex_roundtrip(value):
+    """Reproduce beets' flexible-attribute round-trip: flex values are stored in
+    a SQLite TEXT column (15-significant-digit affinity) and read back through
+    the field type. This matches a real in-memory ``Library`` store/reload
+    exactly, without the ``Item._types`` global-registration fragility.
+    """
+    dt = _types.DateType()
+    con = sqlite3.connect(":memory:")
+    con.execute("CREATE TABLE flex (value TEXT)")
+    con.execute("INSERT INTO flex VALUES (?)", (dt.to_sql(value),))
+    stored = con.execute("SELECT value FROM flex").fetchone()[0]
+    return dt.from_sql(stored)
+
+
+def test_stat_timestamp_survives_db_roundtrip_so_pull_is_idempotent():
+    # The value track_stats writes must equal itself after beets' SQLite-TEXT
+    # flex round-trip, or a reloaded item would never compare equal and every
+    # `beet plex stats` would re-store it. FakeItem keeps raw floats and cannot
+    # catch this, so exercise the real serialization. A sub-second timestamp
+    # (the pre-fix behaviour) would fail this; whole seconds survive exactly.
+    viewed = datetime(2024, 1, 2, 3, 4, 5, 123456, tzinfo=timezone.utc)
+    track = FakeTrack(1, ["/srv/media/a.mp3"], viewCount=1, lastViewedAt=viewed)
+    computed = stats.track_stats(track)["plex_lastviewedat"]
+    assert _beets_flex_roundtrip(computed) == computed
 
 
 def test_plugin_declares_stat_fields():
@@ -70,7 +97,7 @@ def test_pull_writes_stats_for_matched_items():
     item = FakeItem("/mnt/music/a.mp3")
     p.pull_stats(FakeLib([item]), None, pretend=False)
     assert item["plex_viewcount"] == 3
-    assert item["plex_lastviewedat"] == viewed.timestamp()
+    assert item["plex_lastviewedat"] == int(viewed.timestamp())
     assert "plex_updated" in item._fields
     assert item.stored == 1
 
