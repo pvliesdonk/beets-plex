@@ -23,7 +23,7 @@ from beets import ui
 from beets.dbcore import types
 from beets.plugins import BeetsPlugin
 
-from . import matching, pushing, rating, stats
+from . import matching, pushing, rating, scanning, stats
 
 # Stat fields Plex may stop reporting (a wiped play history drops the
 # timestamps). track_stats omits an absent one, so pull_stats clears any
@@ -187,7 +187,34 @@ class PlexPlugin(BeetsPlugin):
         self._touch(destination)  # item_copied / _linked / _hardlinked / _reflinked
 
     def _scan_cli_exit(self, lib=None, **kwargs):
-        pass
+        """Scan the touched directories at the end of the command. A Plex or
+        connection failure is a warning, never fatal — a beets command must not
+        break because Plex is unreachable."""
+        if not self._scan_dirs:
+            return
+        dirs, self._scan_dirs = self._scan_dirs, set()  # take and clear
+        beets_dir, plex_dir = self.directories()
+        plan = scanning.plan_scan(
+            dirs, self.config["scan_threshold"].get(int), beets_dir, plex_dir
+        )
+        for skipped in plan.skipped:
+            self._log.warning("touched dir outside beets_dir, not scanned: {}", skipped)
+        if not plan.full and not plan.paths:
+            return
+        from plexapi.exceptions import PlexApiException
+        from requests.exceptions import RequestException
+
+        try:
+            section = self.section()
+            if plan.full:
+                section.update()
+                self._log.info("triggered a full Plex refresh (> scan_threshold dirs)")
+            else:
+                for path in plan.paths:
+                    section.update(path=path)
+                self._log.info("triggered {} targeted Plex scan(s)", len(plan.paths))
+        except (ui.UserError, PlexApiException, RequestException) as exc:
+            self._log.warning("Plex scan skipped: {}", exc)
 
     # -- playlists --------------------------------------------------------
 

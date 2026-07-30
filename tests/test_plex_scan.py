@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from beetsplug import plex
 from beetsplug.plex import scanning
+from tests.fake_plex import FakeSection, FakeServer
 
 BEETS_DIR = "/mnt/music"
 PLEX_DIR = "/srv/media"
@@ -80,3 +81,46 @@ def test_listeners_registered_only_when_auto_scan(monkeypatch):
     registered.clear()
     plex.PlexPlugin()
     assert "cli_exit" not in registered
+
+
+def _plugin(section):
+    p = plex.PlexPlugin()
+    p._server = FakeServer(section)
+    p.config["beets_dir"].set(BEETS_DIR)
+    p.config["plex_dir"].set(PLEX_DIR)
+    p.config["library_name"].set(section.title)
+    return p
+
+
+def test_cli_exit_runs_targeted_scans_and_clears():
+    section = FakeSection("Muziek", [])
+    p = _plugin(section)
+    p._scan_dirs = {"/mnt/music/a", "/mnt/music/b"}
+    p._scan_cli_exit()
+    assert sorted(section.updates) == ["/srv/media/a", "/srv/media/b"]
+    assert p._scan_dirs == set()  # cleared
+
+
+def test_cli_exit_full_refresh_past_threshold():
+    section = FakeSection("Muziek", [])
+    p = _plugin(section)
+    p.config["scan_threshold"].set(1)
+    p._scan_dirs = {"/mnt/music/a", "/mnt/music/b"}
+    p._scan_cli_exit()
+    assert section.updates == [None]  # one full refresh (no path)
+
+
+def test_cli_exit_no_dirs_does_nothing():
+    section = FakeSection("Muziek", [])
+    p = _plugin(section)
+    p._scan_cli_exit()
+    assert section.updates == []
+
+
+def test_cli_exit_scan_failure_warns_not_raises():
+    section = FakeSection("Muziek", [])
+    section.update_raises = True
+    p = _plugin(section)
+    p._scan_dirs = {"/mnt/music/a"}
+    p._scan_cli_exit()  # must NOT raise
+    assert p._scan_dirs == set()  # still cleared
