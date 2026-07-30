@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from datetime import datetime, timezone
 
@@ -60,10 +61,10 @@ def _beets_flex_roundtrip(value):
     ``Item._types`` global-registration fragility.
     """
     dt = _types.DateType()
-    con = sqlite3.connect(":memory:")
-    con.execute("CREATE TABLE flex (value TEXT)")
-    con.execute("INSERT INTO flex VALUES (?)", (dt.to_sql(value),))
-    stored = con.execute("SELECT value FROM flex").fetchone()[0]
+    with contextlib.closing(sqlite3.connect(":memory:")) as con:
+        con.execute("CREATE TABLE flex (value TEXT)")
+        con.execute("INSERT INTO flex VALUES (?)", (dt.to_sql(value),))
+        stored = con.execute("SELECT value FROM flex").fetchone()[0]
     return dt.from_sql(stored)
 
 
