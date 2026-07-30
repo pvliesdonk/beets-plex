@@ -199,3 +199,53 @@ def test_run_dispatches_playlists(capsys):
 
     p._run(FakeLib([FakeItem("/mnt/music/a.mp3")]), _Opts(), ["playlists"])
     assert p._server.playlist("Fav") is not None
+
+
+def test_collection_created_and_diffed(capsys):
+    a = FakeTrack(1, ["/srv/media/a.mp3"])
+    b = FakeTrack(2, ["/srv/media/b.mp3"])
+    section = FakeSection("Muziek", [a, b])
+    p = _plugin(section)
+    p.config["collections"].set([{"name": "Rated", "query": "x"}])
+    lib = FakeLib([FakeItem("/mnt/music/a.mp3"), FakeItem("/mnt/music/b.mp3")])
+    p.push_collections(lib, [], pretend=False)
+    coll = section.collection("Rated")
+    assert {t.ratingKey for t in coll.items()} == {1, 2}
+    # drop b from the query result → next push removes it (diff)
+    lib2 = FakeLib([FakeItem("/mnt/music/a.mp3")])
+    p.push_collections(lib2, [], pretend=False)
+    assert {t.ratingKey for t in coll.items()} == {1}
+
+
+def test_collection_unchanged_is_noop(capsys):
+    a = FakeTrack(1, ["/srv/media/a.mp3"])
+    section = FakeSection("Muziek", [a])
+    p = _plugin(section)
+    section.createCollection("Rated", items=[a])
+    p.config["collections"].set([{"name": "Rated", "query": "x"}])
+    p.push_collections(FakeLib([FakeItem("/mnt/music/a.mp3")]), [], pretend=False)
+    assert "keep" in capsys.readouterr().out
+
+
+def test_collection_pretend_writes_nothing(capsys):
+    a = FakeTrack(1, ["/srv/media/a.mp3"])
+    section = FakeSection("Muziek", [a])
+    p = _plugin(section)
+    p.config["collections"].set([{"name": "Rated", "query": "x"}])
+    p.push_collections(FakeLib([FakeItem("/mnt/music/a.mp3")]), [], pretend=True)
+    with pytest.raises(NotFound):
+        section.collection("Rated")
+    assert "would" in capsys.readouterr().out
+
+
+def test_run_dispatches_collections(capsys):
+    a = FakeTrack(1, ["/srv/media/a.mp3"])
+    section = FakeSection("Muziek", [a])
+    p = _plugin(section)
+    p.config["collections"].set([{"name": "Rated", "query": "x"}])
+
+    class _Opts:
+        pretend = False
+
+    p._run(FakeLib([FakeItem("/mnt/music/a.mp3")]), _Opts(), ["collections"])
+    assert section.collection("Rated") is not None

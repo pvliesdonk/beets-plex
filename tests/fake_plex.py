@@ -81,7 +81,13 @@ class FakePlaylist:
 
 
 class FakeCollection(FakePlaylist):
-    pass
+    def removeItems(self, items):
+        # Unlike Playlist.removeItems, real Collection.removeItems has no
+        # existence check — it silently no-ops on an absent ratingKey rather
+        # than raising NotFound. Override rather than inherit, so the fake is
+        # not stricter than the real API.
+        drop = {t.ratingKey for t in items}
+        self._items = [t for t in self._items if t.ratingKey not in drop]
 
 
 class FakeSection:

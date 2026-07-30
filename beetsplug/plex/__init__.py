@@ -205,6 +205,62 @@ class PlexPlugin(BeetsPlugin):
         failtail = f"; {failed} failed" if failed else ""
         ui.print_(f"playlists done{failtail}.")
 
+    # -- collections --------------------------------------------------------
+
+    def _push_collection(self, section, name, tracks, pretend):
+        from plexapi.exceptions import NotFound
+
+        try:
+            existing = section.collection(name)
+        except NotFound:
+            existing = None
+        if not tracks:  # the query matched nothing in Plex
+            if existing is None:
+                return "keep"
+            if self.config["prune_empty"].get(bool):
+                if not pretend:
+                    existing.delete()
+                return "prune"
+            ui.print_(
+                f"collection {name!r} query matches nothing; left as-is "
+                "(set plex.prune_empty to delete)"
+            )
+            return "skip"
+        if existing is None:
+            if not pretend:
+                section.createCollection(name, items=tracks)
+            return "create"
+        to_add, to_remove = pushing.collection_diff(existing.items(), tracks)
+        if not to_add and not to_remove:
+            return "keep"
+        if not pretend:
+            if to_add:
+                existing.addItems(to_add)
+            if to_remove:
+                existing.removeItems(to_remove)
+        return "update"
+
+    def push_collections(self, lib, names, pretend=False):
+        from plexapi.exceptions import PlexApiException
+        from requests.exceptions import RequestException
+
+        section = self.section()
+        failed = 0
+        for name, query in self._entries("collections", names):
+            try:
+                # Resolve INSIDE the try: match() sweeps Plex, so a per-entry
+                # network error there must be counted and skipped, not abort all.
+                tracks = self._entry_tracks(lib, query, section)
+                outcome = self._push_collection(section, name, tracks, pretend)
+            except (PlexApiException, RequestException) as exc:
+                failed += 1
+                self._log.warning("collection {!r} failed: {}", name, exc)
+                continue
+            head = "would " if pretend else ""
+            ui.print_(f"{head}{outcome} collection {name!r} ({len(tracks)} track(s))")
+        failtail = f"; {failed} failed" if failed else ""
+        ui.print_(f"collections done{failtail}.")
+
     # -- stats ----------------------------------------------------------------
 
     def pull_stats(self, lib, query, pretend=False):
@@ -372,6 +428,10 @@ class PlexPlugin(BeetsPlugin):
             self.sync_ratings(lib, args[1:], pretend=getattr(opts, "pretend", False))
         elif action == "playlists":
             self.push_playlists(lib, args[1:], pretend=getattr(opts, "pretend", False))
+        elif action == "collections":
+            self.push_collections(
+                lib, args[1:], pretend=getattr(opts, "pretend", False)
+            )
         else:
             raise ui.UserError(f"unknown plex subcommand: {action!r}")
 
