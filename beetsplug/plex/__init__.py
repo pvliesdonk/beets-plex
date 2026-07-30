@@ -184,12 +184,18 @@ class PlexPlugin(BeetsPlugin):
         (on a genuine conflict) the configured ``rating_conflict`` policy picks
         a winner. Each conflict is named per track so the user sees which rating
         was overwritten or left. The beets ``rating`` DB field is the source of
-        truth; ratingtag persists the tag on store if enabled. A Plex write that
-        fails is logged and counted, and its baseline is left untouched so the
-        next sync retries it, rather than aborting the batch. With ``pretend``,
-        each push/adopt/conflict decision is printed per track (unchanged tracks
-        stay silent) and nothing is written.
+        truth: an adopt writes it and stores the item in beets' database;
+        ratingtag then carries it into the file's tags the next time beets writes
+        the file (``beet write``) — the sync never writes tags itself. A Plex
+        write that fails with a Plex API or network error is logged and counted,
+        and its baseline is left untouched so the next sync retries it, rather
+        than aborting the batch. With ``pretend``, each push/adopt/conflict
+        decision is printed per track (unchanged tracks stay silent) and nothing
+        is written.
         """
+        from plexapi.exceptions import PlexApiException
+        from requests.exceptions import RequestException
+
         policy = self.config["rating_conflict"].as_str()
         if policy not in ("plex", "beets", "skip"):
             raise ui.UserError(f"unknown rating_conflict policy: {policy!r}")
@@ -207,8 +213,9 @@ class PlexPlugin(BeetsPlugin):
                 item.get("plex_rating_baseline"),
                 policy,
             )
-            # A conflict discards the losing side's rating; name the track (in both
-            # modes) so the user sees what the policy resolved, or left, per track.
+            # A conflict is resolved by the configured policy — which may
+            # overwrite the losing side's rating, or (under skip) leave both.
+            # Name the track in both modes so the user sees what was resolved.
             if dec.conflict:
                 conflicts += 1
                 outcome = (
@@ -231,12 +238,13 @@ class PlexPlugin(BeetsPlugin):
             if dec.action == rating.PUSH:
                 try:
                     track.rate(dec.value or None)
-                except Exception as exc:
-                    # A transient Plex failure must not abort the batch or leave an
-                    # opaque traceback; skip this item (its baseline is untouched,
-                    # so the next sync retries it) and keep going.
+                except (PlexApiException, RequestException) as exc:
+                    # A Plex API or network error on one track must not abort the
+                    # batch or leave an opaque traceback; skip it (its baseline is
+                    # untouched, so the next sync retries it) and keep going. Other
+                    # exceptions (a real bug) are left to propagate.
                     failed += 1
-                    self._log.warning("could not set Plex rating for {}: {}", path, exc)
+                    self._log.warning("Plex rating write failed for {}: {}", path, exc)
                     continue
                 pushed += 1
             elif dec.action == rating.ADOPT:

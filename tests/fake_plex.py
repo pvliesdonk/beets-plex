@@ -8,6 +8,8 @@ Kept no more forgiving than the real API: ``searchTracks`` returns every track
 
 from __future__ import annotations
 
+from plexapi.exceptions import BadRequest
+
 
 class FakePart:
     def __init__(self, file):
@@ -44,10 +46,11 @@ class FakeTrack:
     def rate(self, rating=None):
         # plexapi: rate(None) resets the rating; 0-10 sets it. Real plexapi's
         # rate() only issues a PUT to the server and does NOT update
-        # userRating locally, so the fake must not either. A real rate() can
-        # raise (BadRequest / network error); rate_raises mirrors that.
+        # userRating locally, so the fake must not either. A real rate() raises
+        # BadRequest (a PlexApiException) on a bad request; rate_raises mirrors
+        # that so the narrowed except in sync_ratings is genuinely exercised.
         if self._rate_raises:
-            raise RuntimeError("simulated Plex rate() failure")
+            raise BadRequest("simulated Plex rate() failure")
         self.rated.append(rating)
 
 
