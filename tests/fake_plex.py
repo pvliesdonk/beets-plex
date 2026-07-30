@@ -38,8 +38,10 @@ class FakeSection:
 class FakeLibrary:
     def __init__(self, section):
         self._section = section
+        self.section_calls = 0
 
     def section(self, title):
+        self.section_calls += 1
         # plexapi's Library.section normalizes with title.lower().strip(); mirror
         # it so the fake is no stricter than the real API.
         if title.lower().strip() != self._section.title.lower().strip():

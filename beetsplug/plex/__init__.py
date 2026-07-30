@@ -81,25 +81,29 @@ class PlexPlugin(BeetsPlugin):
 
     # -- matching -----------------------------------------------------------
 
-    def match(self, items):
+    def match(self, items, section=None):
         """Resolve ``items`` against one fresh sweep of the section.
 
         Returns ``(matched, unmatched)``, where ``matched`` is a list of
         ``(item, track)`` pairs. Matching is by path, so a stale
         ``plex_ratingkey`` never misdirects; an item outside the library root is
-        warned about and left unmatched.
+        warned about and left unmatched. Pass ``section`` to reuse an already
+        resolved section instead of resolving it again.
         """
         beets_dir, plex_dir = self.directories()
-        path_map = matching.build_path_map(self.section().searchTracks())
+        if section is None:
+            section = self.section()
+        path_map = matching.build_path_map(section.searchTracks())
         matched, unmatched = [], []
         for item in items:
             item_path = os.fsdecode(item.path)
-            track = matching.resolve(item_path, path_map, beets_dir, plex_dir)
+            target = matching.plex_path(item_path, beets_dir, plex_dir)
+            track = path_map.get(target) if target is not None else None
             if track is not None:
                 matched.append((item, track))
                 continue
             unmatched.append(item)
-            if matching.plex_path(item_path, beets_dir, plex_dir) is None:
+            if target is None:
                 self._log.warning("item outside beets_dir, not matched: {}", item_path)
         return matched, unmatched
 
@@ -122,7 +126,7 @@ class PlexPlugin(BeetsPlugin):
         nothing."""
         section = self.section()
         items = list(lib.items())
-        matched, unmatched = self.match(items)
+        matched, unmatched = self.match(items, section=section)
         ui.print_(
             f"Connected to Plex library {section.title!r} ({section.totalSize} tracks)."
         )

@@ -131,6 +131,13 @@ def test_status_reports_counts(capsys):
     assert "1 of 2 items matched" in out and "1 unmatched" in out
 
 
+def test_status_resolves_section_once():
+    section = FakeSection("Muziek", [FakeTrack(1, ["/srv/media/a.mp3"])])
+    p = _plugin_with(section)
+    p.status(FakeLib([FakeItem("/mnt/music/a.mp3")]))
+    assert p._server.library.section_calls == 1
+
+
 def test_library_name_is_case_and_space_insensitive():
     # plexapi's Library.section normalizes the title; a case/spacing variant of
     # the configured library_name must still resolve, as it would against Plex.
