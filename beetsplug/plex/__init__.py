@@ -8,13 +8,14 @@ connection, the ``plex_ratingkey`` cache field, and ``beet plex status``.
 from __future__ import annotations
 
 import os
+import time
 
 import beets
 from beets import ui
 from beets.dbcore import types
 from beets.plugins import BeetsPlugin
 
-from . import matching
+from . import matching, stats
 
 
 class PlexPlugin(BeetsPlugin):
@@ -114,10 +115,47 @@ class PlexPlugin(BeetsPlugin):
                 self._log.warning("item outside beets_dir, not matched: {}", item_path)
         return matched, unmatched
 
+    # -- stats ----------------------------------------------------------------
+
+    def pull_stats(self, lib, query, pretend=False):
+        """Pull Plex play statistics into the matched items' beets fields.
+
+        One-way, Plex-authoritative. Only items whose stats actually changed are
+        stored (and only then is ``plex_updated`` bumped); with ``pretend`` the
+        would-be changes are printed and nothing is written.
+        """
+        section = self.section()
+        items = list(lib.items(query))
+        matched, unmatched = self.match(items, section=section)
+        updated = 0
+        for item, track in matched:
+            fields = stats.track_stats(track)
+            if all(item.get(k) == v for k, v in fields.items()):
+                continue
+            updated += 1
+            if pretend:
+                ui.print_(f"would update {os.fsdecode(item.path)}: {fields}")
+                continue
+            for key, value in fields.items():
+                item[key] = value
+            item["plex_updated"] = time.time()
+            item.store()
+        verb = "would update" if pretend else "updated"
+        ui.print_(
+            f"{len(matched)} matched; {updated} {verb}; {len(unmatched)} unmatched."
+        )
+
     # -- commands -----------------------------------------------------------
 
     def commands(self):
         cmd = ui.Subcommand("plex", help="synchronize with a Plex Media Server")
+        cmd.parser.add_option(
+            "-p",
+            "--pretend",
+            action="store_true",
+            default=False,
+            help="show what would change; write nothing",
+        )
         cmd.func = self._run
         return [cmd]
 
@@ -125,6 +163,9 @@ class PlexPlugin(BeetsPlugin):
         action = args[0] if args else "status"
         if action == "status":
             self.status(lib)
+        elif action == "stats":
+            query = args[1:]
+            self.pull_stats(lib, query, pretend=getattr(opts, "pretend", False))
         else:
             raise ui.UserError(f"unknown plex subcommand: {action!r}")
 
