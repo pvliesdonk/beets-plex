@@ -145,6 +145,35 @@ def test_sync_conflict_skip_writes_nothing(capsys):
     assert "1 conflict" in capsys.readouterr().out
 
 
+def test_sync_conflict_beets_policy_pushes(capsys):
+    track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=4.0)
+    p = _plugin(FakeSection("Muziek", [track]), policy="beets")
+    item = FakeItem("/mnt/music/a.mp3", rating=8.0, plex_rating_baseline=6.0)
+    p.sync_ratings(FakeLib([item]), None, pretend=False)
+    assert track.rated == [8.0]  # beets wins → pushed to Plex
+    assert item["rating"] == 8.0  # beets rating unchanged
+    assert item["plex_rating_baseline"] == 8.0
+    assert item["plex_userrating"] == 8.0  # mirror = the pushed value
+    out = capsys.readouterr().out
+    assert "conflict /mnt/music/a.mp3: beets 8.0 vs plex 4.0 → 8.0" in out
+    assert "1 conflict" in out
+
+
+def test_sync_agreement_advances_stale_baseline(capsys):
+    # Both sides independently reached 5.0 over a stale baseline of 2.0: no
+    # writes, but the baseline must advance so a later one-sided change is a
+    # clean push, not a phantom conflict.
+    track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=5.0)
+    p = _plugin(FakeSection("Muziek", [track]))
+    item = FakeItem("/mnt/music/a.mp3", rating=5.0, plex_rating_baseline=2.0)
+    p.sync_ratings(FakeLib([item]), None, pretend=False)
+    assert track.rated == []  # nothing pushed
+    assert item["rating"] == 5.0  # unchanged
+    assert item["plex_rating_baseline"] == 5.0  # advanced from the stale 2.0
+    assert item.stored == 1  # stored to persist the advanced baseline
+    assert "unchanged 1" in capsys.readouterr().out
+
+
 def test_sync_pushes_a_clear_to_plex():
     track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=6.0)
     p = _plugin(FakeSection("Muziek", [track]))
