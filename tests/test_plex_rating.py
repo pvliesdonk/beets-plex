@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
+from beets import ui
 from beets.dbcore import types as _types
 
 from beetsplug import plex
 from beetsplug.plex import rating
 from beetsplug.plex.rating import ADOPT, NONE, PUSH
+from tests.fake_plex import FakeItem, FakeLib, FakeSection, FakeServer, FakeTrack
 
 
 def test_noop_when_both_equal():
@@ -64,3 +67,105 @@ def test_plugin_declares_rating_fields_and_config():
     assert "rating" not in it  # ratingtag owns `rating`; declaring it here collides
     p = plex.PlexPlugin()
     assert p.config["rating_conflict"].as_str() == "plex"
+
+
+BEETS_DIR = "/mnt/music"
+PLEX_DIR = "/srv/media"
+
+
+def _plugin(section, policy="plex"):
+    p = plex.PlexPlugin()
+    p._server = FakeServer(section)
+    p.config["beets_dir"].set(BEETS_DIR)
+    p.config["plex_dir"].set(PLEX_DIR)
+    p.config["library_name"].set(section.title)
+    p.config["rating_conflict"].set(policy)
+    return p
+
+
+def test_sync_pushes_beets_rating_to_plex():
+    track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=None)
+    p = _plugin(FakeSection("Muziek", [track]))
+    item = FakeItem("/mnt/music/a.mp3", rating=7.0)  # rated in beets, not Plex
+    p.sync_ratings(FakeLib([item]), None, pretend=False)
+    assert track.rated == [7.0]  # pushed to Plex
+    assert item["plex_rating_baseline"] == 7.0
+    assert item["plex_userrating"] == 7.0
+    assert item.stored == 1
+
+
+def test_sync_adopts_plex_rating_into_beets():
+    track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=4.0)
+    p = _plugin(FakeSection("Muziek", [track]))
+    item = FakeItem("/mnt/music/a.mp3")  # unrated in beets, rated in Plex
+    p.sync_ratings(FakeLib([item]), None, pretend=False)
+    assert item["rating"] == 4.0  # adopted into beets
+    assert track.rated == []  # Plex not written
+    assert item["plex_rating_baseline"] == 4.0
+
+
+def test_sync_conflict_default_plex_wins_and_counts(capsys):
+    track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=4.0)
+    p = _plugin(FakeSection("Muziek", [track]))
+    item = FakeItem("/mnt/music/a.mp3", rating=8.0, plex_rating_baseline=6.0)
+    p.sync_ratings(FakeLib([item]), None, pretend=False)
+    assert item["rating"] == 4.0  # Plex wins
+    assert "1 conflict" in capsys.readouterr().out
+
+
+def test_sync_conflict_skip_writes_nothing(capsys):
+    track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=4.0)
+    p = _plugin(FakeSection("Muziek", [track]), policy="skip")
+    item = FakeItem("/mnt/music/a.mp3", rating=8.0, plex_rating_baseline=6.0)
+    p.sync_ratings(FakeLib([item]), None, pretend=False)
+    assert item["rating"] == 8.0  # untouched
+    assert track.rated == []
+    assert "1 conflict" in capsys.readouterr().out
+
+
+def test_sync_pushes_a_clear_to_plex():
+    track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=6.0)
+    p = _plugin(FakeSection("Muziek", [track]))
+    item = FakeItem("/mnt/music/a.mp3", rating=0.0, plex_rating_baseline=6.0)
+    p.sync_ratings(FakeLib([item]), None, pretend=False)
+    assert track.rated == [None]  # cleared on Plex (rate(None))
+
+
+def test_sync_pretend_writes_nothing(capsys):
+    track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=4.0)
+    p = _plugin(FakeSection("Muziek", [track]))
+    item = FakeItem("/mnt/music/a.mp3")
+    p.sync_ratings(FakeLib([item]), None, pretend=True)
+    assert item.stored == 0
+    assert "rating" not in item._fields
+    assert track.rated == []
+    assert "would" in capsys.readouterr().out
+
+
+def test_sync_store_only_if_changed(capsys):
+    track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=5.0)
+    p = _plugin(FakeSection("Muziek", [track]))
+    item = FakeItem("/mnt/music/a.mp3")
+    p.sync_ratings(FakeLib([item]), None, pretend=False)  # adopt 5.0, store
+    assert item.stored == 1
+    p.sync_ratings(FakeLib([item]), None, pretend=False)  # nothing changed
+    assert item.stored == 1
+
+
+def test_run_dispatches_sync(capsys):
+    track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=4.0)
+    p = _plugin(FakeSection("Muziek", [track]))
+
+    class _Opts:
+        pretend = False
+
+    p._run(FakeLib([FakeItem("/mnt/music/a.mp3")]), _Opts(), ["sync"])
+    assert "1 matched" in capsys.readouterr().out
+
+
+def test_sync_rejects_unknown_policy():
+    track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=4.0)
+    p = _plugin(FakeSection("Muziek", [track]), policy="bogus")
+    item = FakeItem("/mnt/music/a.mp3", rating=7.0)
+    with pytest.raises(ui.UserError):
+        p.sync_ratings(FakeLib([item]), None, pretend=False)

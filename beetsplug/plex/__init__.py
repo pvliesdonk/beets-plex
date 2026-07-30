@@ -18,7 +18,7 @@ from beets import ui
 from beets.dbcore import types
 from beets.plugins import BeetsPlugin
 
-from . import matching, stats
+from . import matching, rating, stats
 
 # Stat fields Plex may stop reporting (a wiped play history drops the
 # timestamps). track_stats omits an absent one, so pull_stats clears any
@@ -171,6 +171,65 @@ class PlexPlugin(BeetsPlugin):
             f"{len(matched)} matched; {updated} {verb}; {len(unmatched)} unmatched."
         )
 
+    # -- rating sync ----------------------------------------------------------
+
+    def sync_ratings(self, lib, query, pretend=False):
+        """Two-way rating sync between beets and Plex over a private baseline.
+
+        Per matched track, a value-based three-way merge decides whether the
+        beets rating is pushed to Plex, Plex's rating is adopted into beets, or
+        (on a genuine conflict) the configured ``rating_conflict`` policy picks
+        a winner. The beets ``rating`` DB field is the source of truth; ratingtag
+        persists the tag on store if enabled. ``pretend`` writes nothing.
+        """
+        policy = self.config["rating_conflict"].as_str()
+        if policy not in ("plex", "beets", "skip"):
+            raise ui.UserError(f"unknown rating_conflict policy: {policy!r}")
+        section = self.section()
+        items = list(lib.items(query))
+        matched, unmatched = self.match(items, section=section)
+        pushed = adopted = conflicts = 0
+        for item, track in matched:
+            dec = rating.rating_merge(
+                item.get("rating"),
+                track.userRating,
+                item.get("plex_rating_baseline"),
+                policy,
+            )
+            if dec.conflict:
+                conflicts += 1
+            if dec.action == rating.PUSH:
+                pushed += 1
+                if not pretend:
+                    track.rate(dec.value or None)
+            elif dec.action == rating.ADOPT:
+                adopted += 1
+                if not pretend:
+                    item["rating"] = dec.value
+            if pretend:
+                continue
+            # The mirror is Plex's value after the op (only a push changes Plex);
+            # the baseline is the agreed value. Store once, only if something moved.
+            plex_after = (
+                dec.value
+                if dec.action == rating.PUSH
+                else rating.quantize(track.userRating)
+            )
+            dirty = dec.action == rating.ADOPT
+            if rating.quantize(item.get("plex_rating_baseline")) != dec.baseline:
+                item["plex_rating_baseline"] = dec.baseline
+                dirty = True
+            if rating.quantize(item.get("plex_userrating")) != plex_after:
+                item["plex_userrating"] = plex_after
+                dirty = True
+            if dirty:
+                item.store()
+        head = "would " if pretend else ""
+        ui.print_(
+            f"{len(matched)} matched; {head}push {pushed}, adopt {adopted}; "
+            f"{conflicts} conflict(s); {len(unmatched)} unmatched."
+        )
+
     # -- commands -----------------------------------------------------------
 
     def commands(self):
@@ -192,6 +251,8 @@ class PlexPlugin(BeetsPlugin):
         elif action == "stats":
             query = args[1:]
             self.pull_stats(lib, query, pretend=getattr(opts, "pretend", False))
+        elif action == "sync":
+            self.sync_ratings(lib, args[1:], pretend=getattr(opts, "pretend", False))
         else:
             raise ui.UserError(f"unknown plex subcommand: {action!r}")
 

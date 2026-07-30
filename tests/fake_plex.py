@@ -28,6 +28,7 @@ class FakeTrack:
         skipCount=0,
         lastViewedAt=None,
         lastRatedAt=None,
+        userRating=None,
     ):
         self.ratingKey = ratingKey
         self.media = [FakeMedia(files)]
@@ -35,6 +36,13 @@ class FakeTrack:
         self.skipCount = skipCount
         self.lastViewedAt = lastViewedAt
         self.lastRatedAt = lastRatedAt
+        self.userRating = userRating
+        self.rated = []  # records rate() calls
+
+    def rate(self, rating=None):
+        # plexapi: rate(None) resets the rating; 0-10 sets it.
+        self.rated.append(rating)
+        self.userRating = rating
 
 
 class FakeSection:
