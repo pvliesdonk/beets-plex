@@ -7,7 +7,10 @@ from plexapi.exceptions import BadRequest, NotFound
 
 from beetsplug import plex
 from beetsplug.plex import pushing
-from tests.fake_plex import FakeSection, FakeServer, FakeTrack
+from tests.fake_plex import FakeItem, FakeLib, FakeSection, FakeServer, FakeTrack
+
+BEETS_DIR = "/mnt/music"
+PLEX_DIR = "/srv/media"
 
 
 class _T:
@@ -81,3 +84,118 @@ def test_fake_create_requires_items():
         section.createCollection("Empty", items=[])
     with pytest.raises(BadRequest, match="Must include items"):
         section.createCollection("None", items=None)
+
+
+def _plugin(section):
+    p = plex.PlexPlugin()
+    p._server = FakeServer(section)
+    p.config["beets_dir"].set(BEETS_DIR)
+    p.config["plex_dir"].set(PLEX_DIR)
+    p.config["library_name"].set(section.title)
+    return p
+
+
+def test_playlist_created_from_query(capsys):
+    track = FakeTrack(1, ["/srv/media/a.mp3"])
+    section = FakeSection("Muziek", [track])
+    p = _plugin(section)
+    p.config["playlists"].set([{"name": "Fav", "query": "x"}])
+    p.push_playlists(FakeLib([FakeItem("/mnt/music/a.mp3")]), [], pretend=False)
+    pl = p._server.playlist("Fav")
+    assert [t.ratingKey for t in pl.items()] == [1]
+
+
+def test_playlist_unchanged_is_noop(capsys):
+    track = FakeTrack(1, ["/srv/media/a.mp3"])
+    p = _plugin(FakeSection("Muziek", [track]))
+    p._server.createPlaylist("Fav", items=[track])  # already matches
+    p.config["playlists"].set([{"name": "Fav", "query": "x"}])
+    p.push_playlists(FakeLib([FakeItem("/mnt/music/a.mp3")]), [], pretend=False)
+    assert "keep" in capsys.readouterr().out
+
+
+def test_playlist_rebuilt_to_match_order():
+    a = FakeTrack(1, ["/srv/media/a.mp3"])
+    b = FakeTrack(2, ["/srv/media/b.mp3"])
+    p = _plugin(FakeSection("Muziek", [a, b]))
+    p._server.createPlaylist("Fav", items=[b, a])  # wrong order
+    p.config["playlists"].set([{"name": "Fav", "query": "x"}])
+    lib = FakeLib([FakeItem("/mnt/music/a.mp3"), FakeItem("/mnt/music/b.mp3")])
+    p.push_playlists(lib, [], pretend=False)
+    assert [t.ratingKey for t in p._server.playlist("Fav").items()] == [1, 2]
+
+
+def test_playlist_empty_query_skips_unless_prune(capsys):
+    p = _plugin(FakeSection("Muziek", []))
+    existing = p._server.createPlaylist(
+        "Fav", items=[FakeTrack(9, ["/srv/media/z.mp3"])]
+    )
+    p.config["playlists"].set([{"name": "Fav", "query": "x"}])
+    p.push_playlists(FakeLib([]), [], pretend=False)  # nothing matches
+    assert existing.deleted is False  # left as-is
+    assert "prune_empty" in capsys.readouterr().out
+    p.config["prune_empty"].set(True)
+    p.push_playlists(FakeLib([]), [], pretend=False)
+    assert existing.deleted is True  # now pruned
+
+
+def test_playlist_pretend_writes_nothing(capsys):
+    track = FakeTrack(1, ["/srv/media/a.mp3"])
+    p = _plugin(FakeSection("Muziek", [track]))
+    p.config["playlists"].set([{"name": "Fav", "query": "x"}])
+    p.push_playlists(FakeLib([FakeItem("/mnt/music/a.mp3")]), [], pretend=True)
+    with pytest.raises(NotFound):
+        p._server.playlist("Fav")  # not created
+    assert "would" in capsys.readouterr().out
+
+
+def test_playlist_pretend_prune_does_not_delete(capsys):
+    p = _plugin(FakeSection("Muziek", []))
+    existing = p._server.createPlaylist(
+        "Fav", items=[FakeTrack(9, ["/srv/media/z.mp3"])]
+    )
+    p.config["playlists"].set([{"name": "Fav", "query": "x"}])
+    p.config["prune_empty"].set(True)
+    p.push_playlists(FakeLib([]), [], pretend=True)
+    assert existing.deleted is False  # pretend writes nothing
+    assert "would prune" in capsys.readouterr().out
+
+
+def test_playlist_resolution_failure_is_per_entry(capsys):
+    # A transient Plex error while resolving one entry's tracks (a live
+    # section.searchTracks() call inside _entry_tracks) must be caught and
+    # counted like an apply failure, not abort the whole batch.
+    from plexapi.exceptions import PlexApiException
+
+    track = FakeTrack(1, ["/srv/media/a.mp3"])
+    section = FakeSection("Muziek", [track])
+    real_search_tracks = section.searchTracks
+    calls = {"n": 0}
+
+    def flaky_search_tracks(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise PlexApiException("transient")
+        return real_search_tracks(**kwargs)
+
+    section.searchTracks = flaky_search_tracks
+    p = _plugin(section)
+    p.config["playlists"].set(
+        [{"name": "Bad", "query": "x"}, {"name": "Fav", "query": "x"}]
+    )
+    p.push_playlists(FakeLib([FakeItem("/mnt/music/a.mp3")]), [], pretend=False)
+    out = capsys.readouterr().out
+    assert "1 failed" in out
+    assert [t.ratingKey for t in p._server.playlist("Fav").items()] == [1]
+
+
+def test_run_dispatches_playlists(capsys):
+    track = FakeTrack(1, ["/srv/media/a.mp3"])
+    p = _plugin(FakeSection("Muziek", [track]))
+    p.config["playlists"].set([{"name": "Fav", "query": "x"}])
+
+    class _Opts:
+        pretend = False
+
+    p._run(FakeLib([FakeItem("/mnt/music/a.mp3")]), _Opts(), ["playlists"])
+    assert p._server.playlist("Fav") is not None

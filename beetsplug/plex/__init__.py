@@ -21,7 +21,7 @@ from beets import ui
 from beets.dbcore import types
 from beets.plugins import BeetsPlugin
 
-from . import matching, rating, stats
+from . import matching, pushing, rating, stats
 
 # Stat fields Plex may stop reporting (a wiped play history drops the
 # timestamps). track_stats omits an absent one, so pull_stats clears any
@@ -141,6 +141,69 @@ class PlexPlugin(BeetsPlugin):
             if target is None:
                 self._log.warning("item outside beets_dir, not matched: {}", item_path)
         return matched, unmatched
+
+    # -- playlists --------------------------------------------------------
+
+    def _entry_tracks(self, lib, query, section):
+        """Matched Plex tracks for a config entry's query, in query order.
+        Unmatched items (not in Plex) are excluded and warned about."""
+        matched, unmatched = self.match(list(lib.items(query)), section=section)
+        if unmatched:
+            self._log.warning(
+                "{} item(s) for query {!r} are not in Plex; excluded",
+                len(unmatched),
+                query,
+            )
+        return [track for _item, track in matched]
+
+    def _push_playlist(self, name, tracks, pretend):
+        from plexapi.exceptions import NotFound
+
+        try:
+            existing = self.server().playlist(name)
+        except NotFound:
+            existing = None
+        if not tracks:  # the query matched nothing in Plex
+            if existing is None:
+                return "keep"
+            if self.config["prune_empty"].get(bool):
+                if not pretend:
+                    existing.delete()
+                return "prune"
+            ui.print_(
+                f"playlist {name!r} query matches nothing; left as-is "
+                "(set plex.prune_empty to delete)"
+            )
+            return "skip"
+        if existing is None:
+            if not pretend:
+                self.server().createPlaylist(name, items=tracks)
+            return "create"
+        if pushing.playlist_matches(existing.items(), tracks):
+            return "keep"
+        if not pretend:
+            existing.removeItems(existing.items())
+            existing.addItems(tracks)
+        return "update"
+
+    def push_playlists(self, lib, names, pretend=False):
+        from plexapi.exceptions import PlexApiException
+        from requests.exceptions import RequestException
+
+        section = self.section()
+        failed = 0
+        for name, query in self._entries("playlists", names):
+            try:
+                tracks = self._entry_tracks(lib, query, section)
+                outcome = self._push_playlist(name, tracks, pretend)
+            except (PlexApiException, RequestException) as exc:
+                failed += 1
+                self._log.warning("playlist {!r} failed: {}", name, exc)
+                continue
+            head = "would " if pretend else ""
+            ui.print_(f"{head}{outcome} playlist {name!r} ({len(tracks)} track(s))")
+        failtail = f"; {failed} failed" if failed else ""
+        ui.print_(f"playlists done{failtail}.")
 
     # -- stats ----------------------------------------------------------------
 
@@ -307,6 +370,8 @@ class PlexPlugin(BeetsPlugin):
             self.pull_stats(lib, query, pretend=getattr(opts, "pretend", False))
         elif action == "sync":
             self.sync_ratings(lib, args[1:], pretend=getattr(opts, "pretend", False))
+        elif action == "playlists":
+            self.push_playlists(lib, args[1:], pretend=getattr(opts, "pretend", False))
         else:
             raise ui.UserError(f"unknown plex subcommand: {action!r}")
 
