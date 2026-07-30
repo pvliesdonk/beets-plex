@@ -18,7 +18,14 @@ from . import matching
 
 
 class PlexPlugin(BeetsPlugin):
-    item_types = {"plex_ratingkey": types.INTEGER}
+    item_types = {
+        "plex_ratingkey": types.INTEGER,
+        "plex_viewcount": types.INTEGER,
+        "plex_skipcount": types.INTEGER,
+        "plex_lastviewedat": types.DateType(),
+        "plex_lastratedat": types.DateType(),
+        "plex_updated": types.DateType(),
+    }
 
     def __init__(self):
         super().__init__()

@@ -149,7 +149,7 @@ def test_library_name_is_case_and_space_insensitive():
 
 
 def test_plugin_declares_ratingkey_field():
-    assert plex.PlexPlugin.item_types == {"plex_ratingkey": types.INTEGER}
+    assert plex.PlexPlugin.item_types["plex_ratingkey"] is types.INTEGER
 
 
 def test_run_dispatches_status_and_rejects_unknown(capsys):
