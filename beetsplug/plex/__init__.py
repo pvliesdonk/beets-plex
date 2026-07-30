@@ -54,6 +54,9 @@ class PlexPlugin(BeetsPlugin):
                 "beets_dir": "",
                 "plex_dir": "",
                 "rating_conflict": "plex",
+                "playlists": [],
+                "collections": [],
+                "prune_empty": False,
             }
         )
         self.config["token"].redact = True
@@ -101,6 +104,15 @@ class PlexPlugin(BeetsPlugin):
         )
         plex_dir = self.config["plex_dir"].as_str() or beets_dir
         return beets_dir, plex_dir
+
+    def _entries(self, kind, names):
+        """The configured ``(name, query)`` entries for ``kind`` (``"playlists"``
+        or ``"collections"``), filtered to ``names`` if any are given."""
+        entries = [(e["name"], e["query"]) for e in self.config[kind].get(list)]
+        if names:
+            wanted = set(names)
+            entries = [(n, q) for n, q in entries if n in wanted]
+        return entries
 
     # -- matching -----------------------------------------------------------
 

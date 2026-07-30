@@ -8,7 +8,7 @@ Kept no more forgiving than the real API: ``searchTracks`` returns every track
 
 from __future__ import annotations
 
-from plexapi.exceptions import BadRequest
+from plexapi.exceptions import BadRequest, NotFound
 
 
 class FakePart:
@@ -54,14 +54,60 @@ class FakeTrack:
         self.rated.append(rating)
 
 
+class FakePlaylist:
+    def __init__(self, title, items):
+        self.title = title
+        self._items = list(items)
+        self.deleted = False
+
+    def items(self):
+        return list(self._items)
+
+    def addItems(self, items):
+        self._items.extend(items)
+
+    def removeItems(self, items):
+        drop = {t.ratingKey for t in items}
+        current = {t.ratingKey for t in self._items}
+        missing = drop - current
+        if missing:
+            raise NotFound(
+                f"Cannot remove item(s) with ratingKey {missing} not in playlist"
+            )
+        self._items = [t for t in self._items if t.ratingKey not in drop]
+
+    def delete(self):
+        self.deleted = True
+
+
+class FakeCollection(FakePlaylist):
+    pass
+
+
 class FakeSection:
     def __init__(self, title, tracks):
         self.title = title
         self._tracks = list(tracks)
         self.totalSize = len(self._tracks)
+        self._collections = {}
 
     def searchTracks(self, **kwargs):
         return list(self._tracks)
+
+    def collection(self, title):
+        try:
+            return self._collections[title]
+        except KeyError:
+            raise NotFound(f"no collection {title!r}") from None
+
+    def createCollection(self, title, items=None, **kwargs):
+        if not items:
+            raise BadRequest(
+                "Must include items to add when creating new playlist/collection."
+            )
+        coll = FakeCollection(title, items)
+        self._collections[title] = coll
+        return coll
 
 
 class FakeLibrary:
@@ -85,6 +131,22 @@ class NotFoundError(Exception):
 class FakeServer:
     def __init__(self, section):
         self.library = FakeLibrary(section)
+        self._playlists = {}
+
+    def playlist(self, title):
+        try:
+            return self._playlists[title]
+        except KeyError:
+            raise NotFound(f"no playlist {title!r}") from None
+
+    def createPlaylist(self, title, section=None, items=None, **kwargs):
+        if not items:
+            raise BadRequest(
+                "Must include items to add when creating new playlist/collection."
+            )
+        pl = FakePlaylist(title, items)
+        self._playlists[title] = pl
+        return pl
 
 
 class FakeItem:
