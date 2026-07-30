@@ -187,7 +187,8 @@ class PlexPlugin(BeetsPlugin):
         truth; ratingtag persists the tag on store if enabled. A Plex write that
         fails is logged and counted, and its baseline is left untouched so the
         next sync retries it, rather than aborting the batch. With ``pretend``,
-        each decision is printed per track and nothing is written.
+        each push/adopt/conflict decision is printed per track (unchanged tracks
+        stay silent) and nothing is written.
         """
         policy = self.config["rating_conflict"].as_str()
         if policy not in ("plex", "beets", "skip"):
