@@ -55,9 +55,9 @@ def test_track_stats_never_played_omits_timestamps():
 
 def _beets_flex_roundtrip(value):
     """Reproduce beets' flexible-attribute round-trip: flex values are stored in
-    a SQLite TEXT column (15-significant-digit affinity) and read back through
-    the field type. This matches a real in-memory ``Library`` store/reload
-    exactly, without the ``Item._types`` global-registration fragility.
+    a SQLite TEXT column and read back through the field type. This matches a
+    real in-memory ``Library`` store/reload on this SQLite build, without the
+    ``Item._types`` global-registration fragility.
     """
     dt = _types.DateType()
     con = sqlite3.connect(":memory:")
@@ -67,15 +67,19 @@ def _beets_flex_roundtrip(value):
     return dt.from_sql(stored)
 
 
-def test_stat_timestamp_survives_db_roundtrip_so_pull_is_idempotent():
-    # The value track_stats writes must equal itself after beets' SQLite-TEXT
-    # flex round-trip, or a reloaded item would never compare equal and every
-    # `beet plex stats` would re-store it. FakeItem keeps raw floats and cannot
-    # catch this, so exercise the real serialization. A sub-second timestamp
-    # (the pre-fix behaviour) would fail this; whole seconds survive exactly.
+def test_stat_timestamp_is_whole_seconds_and_survives_db_roundtrip():
+    # track_stats must return whole-second timestamps. beets stores these flex
+    # fields as SQLite TEXT, and on a build whose REAL->TEXT conversion is lossy
+    # a sub-second value would not survive the store/reload round-trip, so a
+    # reloaded item would never compare equal and every `beet plex stats` would
+    # re-store it. Whole seconds round-trip exactly on every build. The
+    # whole-second assertion is the build-independent guard (it catches a revert
+    # to full precision on any SQLite); the round-trip assertion confirms
+    # exactness on this build — FakeItem keeps raw floats and cannot.
     viewed = datetime(2024, 1, 2, 3, 4, 5, 123456, tzinfo=timezone.utc)
     track = FakeTrack(1, ["/srv/media/a.mp3"], viewCount=1, lastViewedAt=viewed)
     computed = stats.track_stats(track)["plex_lastviewedat"]
+    assert computed == int(computed)  # whole seconds
     assert _beets_flex_roundtrip(computed) == computed
 
 

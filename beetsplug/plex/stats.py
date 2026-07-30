@@ -6,10 +6,12 @@ never-played track never gets a misleading 1970 timestamp. ``plex_updated`` is
 the plugin's concern (it is the pull time), not this function's.
 
 Timestamps are truncated to whole seconds. beets stores these flexible fields
-as SQLite TEXT, which keeps only ~15 significant digits, so a sub-second
-``.timestamp()`` would not survive the store/reload round-trip unchanged — the
-reloaded value would never equal the freshly computed one, and every pull would
-re-store the item. Whole-second epochs round-trip exactly, keeping the pull
+as SQLite TEXT, and the precision of that REAL-to-TEXT conversion is
+build-dependent (older SQLite keeps ~15 significant digits, newer builds enough
+to round-trip a double exactly). On a lossy build a sub-second ``.timestamp()``
+does not survive the store/reload round-trip unchanged — the reloaded value
+never equals the freshly computed one, so every pull re-stores the item.
+Whole-second epochs round-trip exactly on every build, keeping the pull
 idempotent; one-second resolution is ample for a "last played/rated" time.
 """
 
