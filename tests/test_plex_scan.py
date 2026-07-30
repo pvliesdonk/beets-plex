@@ -110,6 +110,15 @@ def test_cli_exit_full_refresh_past_threshold():
     assert section.updates == [None]  # one full refresh (no path)
 
 
+def test_cli_exit_warns_and_skips_dirs_outside_beets_dir():
+    section = FakeSection("Muziek", [])
+    p = _plugin(section)
+    p._scan_dirs = {"/mnt/music/a", "/other/x"}
+    p._scan_cli_exit()
+    assert section.updates == ["/srv/media/a"]
+    assert p._scan_dirs == set()  # cleared
+
+
 def test_cli_exit_no_dirs_does_nothing():
     section = FakeSection("Muziek", [])
     p = _plugin(section)

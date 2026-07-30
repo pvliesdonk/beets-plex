@@ -10,7 +10,11 @@ cache field, the play-statistics cache fields (``plex_viewcount``,
 ``plex_updated``), the rating-sync fields (``plex_rating_baseline``, the
 last-agreed rating, and ``plex_userrating``, a mirror of Plex's current
 rating), and the ``beet plex status``, ``beet plex stats``, ``beet plex sync``,
-``beet plex playlists``, and ``beet plex collections`` commands.
+``beet plex playlists``, and ``beet plex collections`` commands. When the
+opt-in ``auto_scan`` config is enabled, it also registers import/move/remove
+listeners that accumulate touched directories and, at ``cli_exit``, trigger
+targeted Plex library scans for them (or a single full refresh once the
+directory count passes ``scan_threshold``).
 """
 
 from __future__ import annotations
