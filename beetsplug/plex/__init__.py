@@ -13,8 +13,8 @@ rating), and the ``beet plex status``, ``beet plex stats``, ``beet plex sync``,
 ``beet plex playlists``, and ``beet plex collections`` commands. When the
 opt-in ``auto_scan`` config is enabled, it also registers import/move/remove
 listeners that accumulate touched directories and, at ``cli_exit``, trigger
-targeted Plex library scans for them (or a single full refresh once the
-directory count passes ``scan_threshold``).
+targeted Plex library scans for them (or a single full refresh once more than
+``scan_threshold`` of the touched directories map into the Plex library).
 """
 
 from __future__ import annotations
