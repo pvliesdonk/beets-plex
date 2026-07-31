@@ -12,11 +12,14 @@ file path — no fuzzy matching, no discovery. Two plugins ship in one package:
 
 ## Install
 
-During development, from a checkout:
+    pip install beets-plex
+
+Requires Python 3.10–3.14. Then enable and configure the plugins in your beets
+config — see [Configuration](#configuration).
+
+For development, from a checkout:
 
     pip install -e '.[test]'
-
-Requires Python 3.10–3.14.
 
 ## Configuration
 

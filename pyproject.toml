@@ -26,8 +26,8 @@ classifiers = [
 dynamic = ["version"]
 dependencies = [
     "beets>=2.12",
-    "plexapi",
-    "mediafile",
+    "plexapi>=4.18.0",
+    "mediafile>=0.17.0",
 ]
 
 [project.urls]
