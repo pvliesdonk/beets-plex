@@ -96,9 +96,19 @@ class FakeSection:
         self._tracks = list(tracks)
         self.totalSize = len(self._tracks)
         self._collections = {}
+        self.updates = []  # records update(path=...) calls
+        self.update_raises = False  # every update() raises
+        self.update_fail_paths = set()  # only these paths raise (per-dir failure)
 
     def searchTracks(self, **kwargs):
         return list(self._tracks)
+
+    def update(self, path=None):
+        if self.update_raises or path in self.update_fail_paths:
+            from plexapi.exceptions import PlexApiException
+
+            raise PlexApiException("simulated scan failure")
+        self.updates.append(path)
 
     def collection(self, title):
         # plexapi's Section.collection matches title__iexact (case-insensitive);

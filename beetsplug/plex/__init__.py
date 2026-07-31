@@ -10,7 +10,11 @@ cache field, the play-statistics cache fields (``plex_viewcount``,
 ``plex_updated``), the rating-sync fields (``plex_rating_baseline``, the
 last-agreed rating, and ``plex_userrating``, a mirror of Plex's current
 rating), and the ``beet plex status``, ``beet plex stats``, ``beet plex sync``,
-``beet plex playlists``, and ``beet plex collections`` commands.
+``beet plex playlists``, and ``beet plex collections`` commands. When the
+opt-in ``auto_scan`` config is enabled, it also registers import/move/remove
+listeners that accumulate touched directories and, at ``cli_exit``, trigger
+targeted Plex library scans for them (or a single full refresh once more than
+``scan_threshold`` of the touched directories map into the Plex library).
 """
 
 from __future__ import annotations
@@ -23,7 +27,7 @@ from beets import ui
 from beets.dbcore import types
 from beets.plugins import BeetsPlugin
 
-from . import matching, pushing, rating, stats
+from . import matching, pushing, rating, scanning, stats
 
 # Stat fields Plex may stop reporting (a wiped play history drops the
 # timestamps). track_stats omits an absent one, so pull_stats clears any
@@ -59,10 +63,25 @@ class PlexPlugin(BeetsPlugin):
                 "playlists": [],
                 "collections": [],
                 "prune_empty": False,
+                "auto_scan": False,
+                "scan_threshold": 100,
             }
         )
         self.config["token"].redact = True
         self._server = None
+        self._scan_dirs = set()
+        if self.config["auto_scan"].get(bool):
+            for event in ("item_imported", "item_removed"):
+                self.register_listener(event, self._scan_item)
+            self.register_listener("item_moved", self._scan_move)
+            for event in (
+                "item_copied",
+                "item_linked",
+                "item_hardlinked",
+                "item_reflinked",
+            ):
+                self.register_listener(event, self._scan_place)
+            self.register_listener("cli_exit", self._scan_cli_exit)
 
     # -- connection ---------------------------------------------------------
 
@@ -154,6 +173,68 @@ class PlexPlugin(BeetsPlugin):
             if target is None:
                 self._log.warning("item outside beets_dir, not matched: {}", item_path)
         return matched, unmatched
+
+    # -- auto-scan ----------------------------------------------------------
+
+    def _touch(self, path):
+        """Record the directory of a bytes file ``path`` as touched."""
+        self._scan_dirs.add(os.path.dirname(os.fsdecode(path)))
+
+    def _scan_item(self, item=None, **kwargs):
+        self._touch(item.path)  # item_imported / item_removed
+
+    def _scan_move(self, source=None, destination=None, **kwargs):
+        self._touch(source)  # the file left this directory
+        self._touch(destination)  # and arrived in this one
+
+    def _scan_place(self, destination=None, **kwargs):
+        self._touch(destination)  # item_copied / _linked / _hardlinked / _reflinked
+
+    def _scan_cli_exit(self, lib=None, **kwargs):
+        """Scan the touched directories at the end of the command. A Plex or
+        connection failure is a warning, never fatal — a beets command must not
+        break because Plex is unreachable."""
+        if not self._scan_dirs:
+            return
+        dirs, self._scan_dirs = self._scan_dirs, set()  # take and clear
+        beets_dir, plex_dir = self.directories()
+        plan = scanning.plan_scan(
+            dirs, self.config["scan_threshold"].get(int), beets_dir, plex_dir
+        )
+        for skipped in plan.skipped:
+            self._log.warning("touched dir outside beets_dir, not scanned: {}", skipped)
+        if not plan.full and not plan.paths:
+            return
+        from plexapi.exceptions import PlexApiException
+        from requests.exceptions import RequestException
+
+        # Resolving the section is systemic — if it fails (Plex unreachable or a
+        # misconfigured library), every scan would fail, so warn once and stop.
+        # The label stays cause-neutral; exc carries the precise reason.
+        try:
+            section = self.section()
+        except (ui.UserError, PlexApiException, RequestException) as exc:
+            self._log.warning("Plex scan skipped (could not resolve library): {}", exc)
+            return
+        if plan.full:
+            try:
+                section.update()
+                self._log.info("triggered a full Plex refresh (> scan_threshold dirs)")
+            except (PlexApiException, RequestException) as exc:
+                self._log.warning("Plex full refresh failed: {}", exc)
+            return
+        # Per directory: one failing scan must not drop the rest of the batch,
+        # matching the per-item resilience of the sync/push commands.
+        failed = 0
+        for path in plan.paths:
+            try:
+                section.update(path=path)
+            except (PlexApiException, RequestException) as exc:
+                failed += 1
+                self._log.warning("Plex scan of {} failed: {}", path, exc)
+        scanned = len(plan.paths) - failed
+        if scanned:
+            self._log.info("triggered {} targeted Plex scan(s)", scanned)
 
     # -- playlists --------------------------------------------------------
 
