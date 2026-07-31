@@ -208,17 +208,33 @@ class PlexPlugin(BeetsPlugin):
         from plexapi.exceptions import PlexApiException
         from requests.exceptions import RequestException
 
+        # Resolving the section is systemic — if it fails (Plex unreachable or a
+        # misconfigured library), every scan would fail, so warn once and stop.
+        # The label stays cause-neutral; exc carries the precise reason.
         try:
             section = self.section()
-            if plan.full:
+        except (ui.UserError, PlexApiException, RequestException) as exc:
+            self._log.warning("Plex scan skipped (could not resolve library): {}", exc)
+            return
+        if plan.full:
+            try:
                 section.update()
                 self._log.info("triggered a full Plex refresh (> scan_threshold dirs)")
-            else:
-                for path in plan.paths:
-                    section.update(path=path)
-                self._log.info("triggered {} targeted Plex scan(s)", len(plan.paths))
-        except (ui.UserError, PlexApiException, RequestException) as exc:
-            self._log.warning("Plex scan skipped: {}", exc)
+            except (PlexApiException, RequestException) as exc:
+                self._log.warning("Plex full refresh failed: {}", exc)
+            return
+        # Per directory: one failing scan must not drop the rest of the batch,
+        # matching the per-item resilience of the sync/push commands.
+        failed = 0
+        for path in plan.paths:
+            try:
+                section.update(path=path)
+            except (PlexApiException, RequestException) as exc:
+                failed += 1
+                self._log.warning("Plex scan of {} failed: {}", path, exc)
+        scanned = len(plan.paths) - failed
+        if scanned:
+            self._log.info("triggered {} targeted Plex scan(s)", scanned)
 
     # -- playlists --------------------------------------------------------
 

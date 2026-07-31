@@ -73,7 +73,7 @@ def test_config_defaults():
     assert p.config["scan_threshold"].get(int) == 100
 
 
-# The scan events PR6 wires, each to its handler (beets' own base-class
+# The scan events this plugin wires, each to its handler (beets' own base-class
 # registrations, e.g. pluginload, are not ours and are ignored below).
 _SCAN_WIRING = {
     "item_imported": "_scan_item",
@@ -123,6 +123,9 @@ def _plugin(section):
     p.config["beets_dir"].set(BEETS_DIR)
     p.config["plex_dir"].set(PLEX_DIR)
     p.config["library_name"].set(section.title)
+    # Set explicitly: beets' config is a process-global singleton, so a prior
+    # test's scan_threshold would otherwise leak in.
+    p.config["scan_threshold"].set(100)
     return p
 
 
@@ -195,3 +198,26 @@ def test_cli_exit_unexpected_error_propagates():
     p._scan_dirs = {"/mnt/music/a"}
     with pytest.raises(RuntimeError):
         p._scan_cli_exit()
+
+
+def test_cli_exit_one_failing_scan_does_not_drop_the_rest():
+    # Per-item resilience: a single failing directory scan must not abort the
+    # batch — the other directories are still scanned (matches sync/push).
+    section = FakeSection("Muziek", [])
+    section.update_fail_paths = {"/srv/media/a"}
+    p = _plugin(section)
+    p._scan_dirs = {"/mnt/music/a", "/mnt/music/b", "/mnt/music/c"}
+    p._scan_cli_exit()  # a fails; b and c still get scanned
+    assert sorted(section.updates) == ["/srv/media/b", "/srv/media/c"]
+    assert p._scan_dirs == set()
+
+
+def test_cli_exit_all_dirs_skipped_never_touches_plex():
+    # When every touched dir is outside beets_dir, there is nothing to scan and
+    # the plugin never even connects to Plex.
+    section = FakeSection("Muziek", [])
+    p = _plugin(section)
+    p._scan_dirs = {"/other/x", "/other/y"}
+    p._scan_cli_exit()
+    assert section.updates == []
+    assert p._scan_dirs == set()
