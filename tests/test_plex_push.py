@@ -323,11 +323,7 @@ def test_collection_empty_query_skips_unless_prune(capsys):
         "Rated", items=[FakeTrack(9, ["/srv/media/z.mp3"])]
     )
     p.config["collections"].set([{"name": "Rated", "query": "x"}])
-    # beets' config is a process-global singleton (BeetsPlugin.config is a
-    # subview onto it), so an earlier test's prune_empty=True can leak in
-    # here; set it explicitly rather than rely on suite ordering.
-    p.config["prune_empty"].set(False)
-    p.push_collections(FakeLib([]), [], pretend=False)  # nothing matches
+    p.push_collections(FakeLib([]), [], pretend=False)  # nothing matches, default keeps
     assert existing.deleted is False  # left as-is
     assert "prune_empty" in capsys.readouterr().out
     p.config["prune_empty"].set(True)

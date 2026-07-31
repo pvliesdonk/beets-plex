@@ -96,11 +96,8 @@ def test_all_listeners_registered_and_wired_when_auto_scan(monkeypatch):
         "register_listener",
         lambda self, event, func: registered.__setitem__(event, func.__name__),
     )
-    config["plex"]["auto_scan"].set(True)
-    try:
-        plex.PlexPlugin()
-    finally:
-        config["plex"]["auto_scan"].set(False)
+    config["plex"]["auto_scan"].set(True)  # reset per test by _isolate_beets_config
+    plex.PlexPlugin()
     # every scan event is wired to its intended handler — dropping or mis-wiring
     # any one would silently disable auto-scan for that operation.
     assert {e: registered.get(e) for e in _SCAN_WIRING} == _SCAN_WIRING
@@ -123,9 +120,6 @@ def _plugin(section):
     p.config["beets_dir"].set(BEETS_DIR)
     p.config["plex_dir"].set(PLEX_DIR)
     p.config["library_name"].set(section.title)
-    # Set explicitly: beets' config is a process-global singleton, so a prior
-    # test's scan_threshold would otherwise leak in.
-    p.config["scan_threshold"].set(100)
     return p
 
 
