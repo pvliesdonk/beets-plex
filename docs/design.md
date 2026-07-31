@@ -13,7 +13,8 @@ path. No fuzzy matching, no discovery, no AI.
 ## Goals
 
 1. Update Plex when beets imports, moves, or removes files.
-2. Two-way rating sync between beets and Plex; newest change wins.
+2. Two-way rating sync between beets and Plex; a value-based three-way merge,
+   genuine conflicts resolved by a configured policy.
 3. One-way pull of Plex play statistics into beets fields.
 4. One-way push of query-defined playlists from beets to Plex.
 5. One-way sync of query-defined track collections from beets to Plex.
@@ -33,12 +34,11 @@ back to Plex.
   touches file tags itself.
 
 They compose through beets rather than through each other: when `plex` changes a
-rating it asks beets to write the item, and `ratingtag`, if enabled, writes the
-tag. There is no import-time dependency in either direction. One coupling is
-real and easy to get wrong, so it is called out here: after pulling a rating
-from Plex, `plex` has to confirm the tag actually took, and whether it can
-depends both on whether `ratingtag` is enabled and on whether the file's format
-stores ratings at all.
+rating it writes the beets `rating` database field and stores the item; if
+`ratingtag` is enabled, it carries that value into the file's tags the next time
+beets writes the file (`beet write`). The beets database is the source of truth,
+so `plex` never inspects or confirms file tags — beets can always rewrite them
+from the database. There is no import-time dependency in either direction.
 
 ## How each part behaves
 
@@ -46,12 +46,15 @@ stores ratings at all.
   the affected directories, replacing the built-in `plexupdate`'s full-section
   refresh, with a fall-back to a full refresh past a threshold. A scan failure
   degrades to a warning; it never breaks the beets command.
-- **Rating sync.** A three-way merge per matched track over a last-agreed
-  baseline, the beets rating, and the Plex rating; the newest change wins, with
-  a configured tiebreak when a timestamp is missing. This is the riskiest
-  surface — timestamps are missing more often than is comfortable. The baseline
-  is private to this plugin and kept separate from the fields that mirror Plex,
-  so a co-installed plugin cannot reinterpret one plugin's value as another's.
+- **Rating sync.** A value-based three-way merge per matched track over a
+  last-agreed baseline, the beets rating, and the Plex rating. beets has no
+  per-field change timestamp, so time-ordering is impossible: a change on one
+  side only is resolved by value against the baseline, and a genuine conflict —
+  both sides moved apart from the baseline — is decided by the configured
+  `rating_conflict` policy (`plex`, `beets`, or `skip`; default `plex`). The
+  baseline is private to this plugin and kept separate from the fields that
+  mirror Plex, so a co-installed plugin cannot reinterpret one plugin's value as
+  another's.
 - **Play statistics.** A one-way pull of Plex counts and timestamps into beets
   fields.
 - **Playlists and collections.** One-way, from a beets query to a Plex playlist
@@ -61,7 +64,7 @@ stores ratings at all.
 
 The plugin extends the existing shared `plex:` config section: connection
 details, the two path prefixes (beets-side and Plex-side), and switches for
-auto-scan, the both-sides-changed tiebreak, and whether a query that now matches
+auto-scan, the rating-conflict policy, and whether a query that now matches
 nothing may delete its playlist or collection. Field and config names follow
 `beets-plexsync`'s where they overlap, to stay compatible with existing data.
 
