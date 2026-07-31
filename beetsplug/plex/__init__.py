@@ -454,10 +454,16 @@ class PlexPlugin(BeetsPlugin):
             # Name the track in both modes so the user sees what was resolved.
             if dec.conflict:
                 conflicts += 1
+                # Describe the decision, not a landed write: this line prints
+                # before the push below is attempted, so a bare "→ Z" would read
+                # as done even when that push then fails — the only failure signal
+                # is the per-track warning and the aggregate "N failed" tail.
                 outcome = (
-                    "left unresolved" if dec.action == rating.NONE else f"→ {dec.value}"
+                    "left unresolved"
+                    if dec.action == rating.NONE
+                    else f"resolving to {dec.value}"
                 )
-                ui.print_(f"conflict {path}: beets {b} vs plex {p} {outcome}")
+                ui.print_(f"conflict {path}: beets {b} vs plex {p} ({outcome})")
 
             if pretend:
                 if dec.action == rating.PUSH:

@@ -113,7 +113,7 @@ def test_sync_conflict_default_plex_wins_and_counts(capsys):
     assert item["rating"] == 4.0  # Plex wins
     out = capsys.readouterr().out
     # a real run names the conflicted track (not just the aggregate count)
-    assert "conflict /mnt/music/a.mp3: beets 8.0 vs plex 4.0 → 4.0" in out
+    assert "conflict /mnt/music/a.mp3: beets 8.0 vs plex 4.0 (resolving to 4.0)" in out
     assert "1 conflict" in out
 
 
@@ -170,8 +170,25 @@ def test_sync_conflict_beets_policy_pushes(capsys):
     assert item["plex_rating_baseline"] == 8.0
     assert item["plex_userrating"] == 8.0  # mirror = the pushed value
     out = capsys.readouterr().out
-    assert "conflict /mnt/music/a.mp3: beets 8.0 vs plex 4.0 → 8.0" in out
+    assert "conflict /mnt/music/a.mp3: beets 8.0 vs plex 4.0 (resolving to 8.0)" in out
     assert "1 conflict" in out
+
+
+def test_sync_conflict_push_failure_reads_as_decision_not_done(capsys):
+    # The wording contract for a conflict resolved by a push: the conflict line
+    # prints before track.rate() runs, so when that push then fails it must read
+    # as a decision, not a completed write. The failure shows only in the warning
+    # and the "N failed" tail, and the baseline is left for the next sync to retry.
+    track = FakeTrack(1, ["/srv/media/a.mp3"], userRating=4.0, rate_raises=True)
+    p = _plugin(FakeSection("Muziek", [track]), policy="beets")
+    item = FakeItem("/mnt/music/a.mp3", rating=8.0, plex_rating_baseline=6.0)
+    p.sync_ratings(FakeLib([item]), None, pretend=False)
+    out = capsys.readouterr().out
+    assert "conflict /mnt/music/a.mp3: beets 8.0 vs plex 4.0 (resolving to 8.0)" in out
+    assert "→ 8.0" not in out  # never the old wording that implied the write landed
+    assert "1 failed" in out  # the push failure is surfaced, not swallowed
+    assert item["plex_rating_baseline"] == 6.0  # untouched → retried next sync
+    assert track.rated == []  # rate() raised, so nothing was recorded
 
 
 def test_sync_agreement_advances_stale_baseline(capsys):
@@ -226,7 +243,7 @@ def test_sync_pretend_marks_conflict(capsys):
     item = FakeItem("/mnt/music/a.mp3", rating=8.0, plex_rating_baseline=6.0)
     p.sync_ratings(FakeLib([item]), None, pretend=True)
     out = capsys.readouterr().out
-    assert "conflict /mnt/music/a.mp3: beets 8.0 vs plex 4.0 → 4.0" in out
+    assert "conflict /mnt/music/a.mp3: beets 8.0 vs plex 4.0 (resolving to 4.0)" in out
     assert "would adopt /mnt/music/a.mp3: →4.0" in out
     assert track.rated == []  # pretend writes nothing
 
